@@ -1,0 +1,22 @@
+{
+  "name": "cloudflare-mfe-module-registry-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run cf:resolve-config && wrangler dev --config wrangler.resolved.jsonc --env preview",
+    "cf:resolve-config": "node scripts/resolve-wrangler-d1-ids.mjs --input wrangler.jsonc --output wrangler.resolved.jsonc",
+    "deploy:preview": "npm run cf:resolve-config && WRANGLER_LOG=error wrangler deploy --config wrangler.resolved.jsonc --env preview",
+    "deploy:production": "npm run cf:resolve-config && WRANGLER_LOG=error wrangler deploy --config wrangler.resolved.jsonc --env production",
+    "db:migrate:local": "wrangler d1 migrations apply REGISTRY_DB --local --env preview --config wrangler.jsonc",
+    "db:migrate:preview": "npm run cf:resolve-config && wrangler d1 migrations apply REGISTRY_DB --env preview --config wrangler.resolved.jsonc",
+    "db:migrate:production": "npm run cf:resolve-config && wrangler d1 migrations apply REGISTRY_DB --env production --config wrangler.resolved.jsonc",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260224.0",
+    "typescript": "^5.9.2",
+    "wrangler": "^4.70.0"
+  }
+}

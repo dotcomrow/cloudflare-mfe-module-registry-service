@@ -1,0 +1,54 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudflare-mfe-module-registry-service",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-03-09",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "env": {
+    "preview": {
+      "vars": {
+        "ENVIRONMENT": "dev",
+        "SERVICE_TITLE": "MFE Module Registry",
+        "GOOGLE_AUTH_ENABLED": "true",
+        "GOOGLE_AUTH_ALLOWED_AUDIENCES": "",
+        "GOOGLE_AUTH_ALLOWED_EMAILS": "",
+        "GOOGLE_AUTH_ALLOWED_DOMAINS": "",
+        "GOOGLE_AUTH_ALLOWED_GROUPS": "",
+        "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_EMAIL": "",
+        "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_PRIVATE_KEY": "",
+        "GOOGLE_AUTH_GROUPS_IMPERSONATED_USER": "",
+        "GOOGLE_AUTH_GROUPS_CACHE_TTL_SECONDS": "300"
+      },
+      "d1_databases": [
+        {
+          "binding": "REGISTRY_DB",
+          "database_name": "mfe-module-registry-dev"
+        }
+      ]
+    },
+    "production": {
+      "vars": {
+        "ENVIRONMENT": "prod",
+        "SERVICE_TITLE": "MFE Module Registry",
+        "GOOGLE_AUTH_ENABLED": "true",
+        "GOOGLE_AUTH_ALLOWED_AUDIENCES": "",
+        "GOOGLE_AUTH_ALLOWED_EMAILS": "",
+        "GOOGLE_AUTH_ALLOWED_DOMAINS": "",
+        "GOOGLE_AUTH_ALLOWED_GROUPS": "",
+        "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_EMAIL": "",
+        "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_PRIVATE_KEY": "",
+        "GOOGLE_AUTH_GROUPS_IMPERSONATED_USER": "",
+        "GOOGLE_AUTH_GROUPS_CACHE_TTL_SECONDS": "300"
+      },
+      "d1_databases": [
+        {
+          "binding": "REGISTRY_DB",
+          "database_name": "mfe-module-registry-prod"
+        }
+      ]
+    }
+  }
+}

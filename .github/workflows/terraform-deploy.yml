@@ -1,0 +1,96 @@
+name: Terraform Deploy
+
+on:
+  push:
+    branches:
+      - dev
+      - prod
+  workflow_dispatch:
+
+permissions: write-all
+
+jobs:
+  deploy:
+    name: Apply Terraform
+    runs-on: ubuntu-latest
+    env:
+      TF_CLOUD_ORGANIZATION: ${{ github.repository_owner }}
+      TF_API_TOKEN: ${{ secrets.TFE_TOKEN }}
+      TFC_WORKSPACE_PRODUCTION: ${{ vars.TFC_WORKSPACE_PRODUCTION }}
+      TFC_WORKSPACE_PREVIEW: ${{ vars.TFC_WORKSPACE_PREVIEW }}
+
+    steps:
+      - name: Check state of initial-deploy workflow
+        id: check_state
+        run: |
+          echo "initial_deploy_state=$(gh api -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' /repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/actions/workflows/initial-deploy.yml | jq -r '.state')" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Resolve deployment target
+        id: target
+        if: ${{ steps.check_state.outputs.initial_deploy_state == 'disabled_manually' }}
+        run: |
+          PROD_WORKSPACE="${TFC_WORKSPACE_PRODUCTION:-${{ github.event.repository.name }}}"
+          PREVIEW_WORKSPACE="${TFC_WORKSPACE_PREVIEW:-${{ github.event.repository.name }}-preview}"
+
+          if [ "${GITHUB_REF_NAME}" = "prod" ]; then
+            echo "workspace=${PROD_WORKSPACE}" >> "$GITHUB_OUTPUT"
+            echo "deployment_environment=production" >> "$GITHUB_OUTPUT"
+            echo "manage_d1_resources=true" >> "$GITHUB_OUTPUT"
+            echo "wrangler_env=production" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_REF_NAME}" = "dev" ]; then
+            echo "workspace=${PREVIEW_WORKSPACE}" >> "$GITHUB_OUTPUT"
+            echo "deployment_environment=preview" >> "$GITHUB_OUTPUT"
+            echo "manage_d1_resources=false" >> "$GITHUB_OUTPUT"
+            echo "wrangler_env=preview" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unsupported branch for deployment: ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        if: ${{ steps.check_state.outputs.initial_deploy_state == 'disabled_manually' }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Setup Node.js
+        if: ${{ steps.check_state.outputs.initial_deploy_state == 'disabled_manually' }}
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: ${{ steps.check_state.outputs.initial_deploy_state == 'disabled_manually' }}
+        run: npm ci
+
+      - name: Resolve Wrangler config
+        if: ${{ steps.check_state.outputs.initial_deploy_state == 'disabled_manually' }}
+        run: npm run cf:resolve-config
+
+      - name: Bundle worker entrypoint with Wrangler
+        if: ${{ steps.check_state.outputs.initial_deploy_state == 'disabled_manually' }}
+        run: |
+          rm -rf terraform/worker-build
+          mkdir -p terraform/worker-build
+          WRANGLER_LOG=error npx wrangler deploy --dry-run --outdir terraform/worker-build --config wrangler.resolved.jsonc --env ${{ steps.target.outputs.wrangler_env }}
+
+      - name: Upload Terraform Config
+        if: ${{ steps.check_state.outputs.initial_deploy_state == 'disabled_manually' }}
+        uses: hashicorp/tfc-workflows-github/actions/upload-configuration@8e08d1ba957673f5fbf971a22b3219639dc45661
+        id: upload
+        with:
+          workspace: ${{ steps.target.outputs.workspace }}
+          directory: terraform
+
+      - name: Create Apply Run
+        if: ${{ steps.check_state.outputs.initial_deploy_state == 'disabled_manually' }}
+        uses: hashicorp/tfc-workflows-github/actions/create-run@8e08d1ba957673f5fbf971a22b3219639dc45661
+        id: apply-run
+        env:
+          TF_VAR_deployment_environment: '"${{ steps.target.outputs.deployment_environment }}"'
+          TF_VAR_manage_d1_resources: ${{ steps.target.outputs.manage_d1_resources }}
+        with:
+          workspace: ${{ steps.target.outputs.workspace }}
+          configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
+          plan_only: false
