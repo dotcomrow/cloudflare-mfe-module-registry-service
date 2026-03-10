@@ -146,7 +146,9 @@ npm run deploy:production
 
 ## D1 Migrations
 
-After creating a new D1 database (for example first production deploy), apply migrations:
+The Worker now auto-bootstraps the base schema (`modules`, `module_versions`, `publish_events`) on first DB access using idempotent `CREATE ... IF NOT EXISTS` statements.
+
+Manual migration commands remain available and are useful when you add future schema changes:
 
 ```bash
 npm run db:migrate:preview
