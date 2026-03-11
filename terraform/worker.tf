@@ -46,6 +46,11 @@ resource "cloudflare_worker_version" "app" {
       id   = local.active_registry_database_id
     },
     {
+      type        = "r2_bucket"
+      name        = "REGISTRY_ASSETS"
+      bucket_name = local.active_r2_assets_bucket_name
+    },
+    {
       type = "plain_text"
       name = "ENVIRONMENT"
       text = local.active_runtime_environment
@@ -96,6 +101,31 @@ resource "cloudflare_worker_version" "app" {
       text = tostring(var.google_auth_groups_cache_ttl_seconds)
     },
     {
+      type = "plain_text"
+      name = "PUBLISH_UPLOADS_ENABLED"
+      text = var.publish_uploads_enabled
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_UPLOADS_PUBLIC_BASE_URL"
+      text = local.active_publish_uploads_public_base_url
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_UPLOADS_R2_PREFIX"
+      text = var.publish_uploads_r2_prefix
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_UPLOADS_MAX_BUNDLE_BYTES"
+      text = tostring(var.publish_uploads_max_bundle_bytes)
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_UPLOADS_MAX_MANIFEST_BYTES"
+      text = tostring(var.publish_uploads_max_manifest_bytes)
+    },
+    {
       type = "secret_text"
       name = "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_PRIVATE_KEY"
       text = var.google_auth_groups_service_account_private_key
@@ -114,6 +144,13 @@ resource "cloudflare_worker_version" "app" {
         trimspace(var.google_auth_groups_impersonated_user) != ""
       )
       error_message = "When google_auth_allowed_groups is set, you must also set google_auth_groups_service_account_email, google_auth_groups_service_account_private_key, and google_auth_groups_impersonated_user."
+    }
+    precondition {
+      condition = !contains(["1", "true", "yes", "on"], lower(trimspace(var.publish_uploads_enabled))) || (
+        trimspace(var.publish_uploads_public_base_url_preview) != "" &&
+        trimspace(var.publish_uploads_public_base_url_production) != ""
+      )
+      error_message = "When publish_uploads_enabled is true, publish_uploads_public_base_url_preview and publish_uploads_public_base_url_production must both be set."
     }
   }
 }

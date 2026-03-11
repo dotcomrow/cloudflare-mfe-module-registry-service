@@ -68,6 +68,24 @@ variable "d1_prod_read_replication_mode" {
   default     = "auto"
 }
 
+variable "manage_r2_resources" {
+  type        = bool
+  description = "When true, Terraform creates R2 buckets; when false it references bucket names only."
+  default     = true
+}
+
+variable "r2_dev_assets_bucket_name" {
+  type        = string
+  description = "Preview R2 bucket used to store uploaded module assets."
+  default     = "mfe-module-registry-dev-assets"
+}
+
+variable "r2_prod_assets_bucket_name" {
+  type        = string
+  description = "Production R2 bucket used to store uploaded module assets."
+  default     = "mfe-module-registry-prod-assets"
+}
+
 variable "worker_service_name_production" {
   type        = string
   description = "Optional Worker service name override for production."
@@ -253,4 +271,40 @@ variable "google_auth_groups_cache_ttl_seconds" {
   type        = number
   description = "GOOGLE_AUTH_GROUPS_CACHE_TTL_SECONDS binding value."
   default     = 300
+}
+
+variable "publish_uploads_enabled" {
+  type        = string
+  description = "PUBLISH_UPLOADS_ENABLED binding value."
+  default     = "true"
+}
+
+variable "publish_uploads_public_base_url_preview" {
+  type        = string
+  description = "Preview public base URL for uploaded R2 assets."
+  default     = ""
+}
+
+variable "publish_uploads_public_base_url_production" {
+  type        = string
+  description = "Production public base URL for uploaded R2 assets."
+  default     = ""
+}
+
+variable "publish_uploads_r2_prefix" {
+  type        = string
+  description = "PUBLISH_UPLOADS_R2_PREFIX binding value."
+  default     = "modules"
+}
+
+variable "publish_uploads_max_bundle_bytes" {
+  type        = number
+  description = "PUBLISH_UPLOADS_MAX_BUNDLE_BYTES binding value."
+  default     = 52428800
+}
+
+variable "publish_uploads_max_manifest_bytes" {
+  type        = number
+  description = "PUBLISH_UPLOADS_MAX_MANIFEST_BYTES binding value."
+  default     = 5242880
 }

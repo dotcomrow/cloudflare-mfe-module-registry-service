@@ -1,12 +1,21 @@
 import { requireGooglePublishAuth } from "./google-auth";
 import { getModuleDetails, getModuleVersion, listModules, publishModuleVersion, validatePublishPayload } from "./registry";
-import type { Env, PublishChannel } from "./types";
+import type { Env, PublishChannel, PublishPayload } from "./types";
 import { renderIndexHtml } from "./ui";
-import { HttpError, jsonResponse } from "./util";
+import { HttpError, isRecord, jsonResponse, toBooleanFlag } from "./util";
 
 const API_HEADERS: HeadersInit = {
   "cache-control": "no-store",
 };
+
+const MAX_JSON_PUBLISH_BODY_BYTES = 1024 * 1024;
+const DEFAULT_MAX_BUNDLE_BYTES = 50 * 1024 * 1024;
+const DEFAULT_MAX_MANIFEST_BYTES = 5 * 1024 * 1024;
+
+interface ParsedPublishRequest {
+  payload: PublishPayload;
+  requestBodyText: string;
+}
 
 function addCorsHeaders(response: Response): Response {
   const headers = new Headers(response.headers);
@@ -50,6 +59,311 @@ function parseIntegerParam(raw: string | null, fallback: number, min: number, ma
     return fallback;
   }
   return Math.max(min, Math.min(max, parsed));
+}
+
+function parseByteLimit(raw: string | undefined, fallback: number): number {
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return fallback;
+  }
+  const parsed = Number.parseInt(raw.trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function sanitizePathSegment(value: string, fallback: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+  return normalized.length > 0 ? normalized : fallback;
+}
+
+function normalizeUploadPrefix(raw: string | undefined): string {
+  const trimmed = (raw ?? "modules").trim().replace(/^\/+|\/+$/g, "");
+  return trimmed.length > 0 ? trimmed : "modules";
+}
+
+function getFileExtension(fileName: string, fallback: string): string {
+  const lastDot = fileName.lastIndexOf(".");
+  if (lastDot < 0) {
+    return fallback;
+  }
+  const ext = fileName.slice(lastDot + 1).toLowerCase();
+  if (!/^[a-z0-9]{1,10}$/.test(ext)) {
+    return fallback;
+  }
+  return `.${ext}`;
+}
+
+function encodeObjectKeyForUrl(key: string): string {
+  return key
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function buildPublicAssetUrl(baseUrl: string, objectKey: string): string {
+  const normalizedBase = baseUrl.replace(/\/+$/g, "");
+  const encodedKey = encodeObjectKeyForUrl(objectKey);
+  return `${normalizedBase}/${encodedKey}`;
+}
+
+function getRequiredPayloadString(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new HttpError(400, `Publish payload is missing required field '${key}'.`);
+  }
+  return value.trim();
+}
+
+function parsePayloadChannel(payload: Record<string, unknown>): PublishChannel {
+  const channel = getRequiredPayloadString(payload, "channel").toLowerCase();
+  if (channel !== "preview" && channel !== "prod") {
+    throw new HttpError(400, "Invalid publish channel. Expected 'preview' or 'prod'.");
+  }
+  return channel;
+}
+
+function parseOptionalJsonField(entry: FormDataEntryValue | null, fieldName: string): unknown {
+  if (entry === null) {
+    return undefined;
+  }
+  if (typeof entry !== "string") {
+    throw new HttpError(400, `${fieldName} must be JSON text when provided.`);
+  }
+  const trimmed = entry.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    throw new HttpError(400, `${fieldName} must be valid JSON.`);
+  }
+}
+
+function parseOptionalStringField(entry: FormDataEntryValue | null): string | undefined {
+  if (entry === null) {
+    return undefined;
+  }
+  if (typeof entry !== "string") {
+    throw new HttpError(400, "Multipart field must be text.");
+  }
+  const trimmed = entry.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parseMultipartFields(form: FormData): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+
+  const scalarFields = [
+    "module_key",
+    "module_version",
+    "channel",
+    "published_at",
+    "provider",
+    "component_type",
+    "bundle_url",
+    "manifest_url",
+  ] as const;
+
+  for (const field of scalarFields) {
+    const value = parseOptionalStringField(form.get(field));
+    if (typeof value === "string") {
+      payload[field] = value;
+    }
+  }
+
+  const release = parseOptionalJsonField(form.get("release"), "release");
+  const definition = parseOptionalJsonField(form.get("definition"), "definition");
+  const seed = parseOptionalJsonField(form.get("seed"), "seed");
+  const checksums = parseOptionalJsonField(form.get("checksums"), "checksums");
+
+  if (release !== undefined) {
+    payload.release = release;
+  }
+  if (definition !== undefined) {
+    payload.definition = definition;
+  }
+  if (seed !== undefined) {
+    payload.seed = seed;
+  }
+  if (checksums !== undefined) {
+    payload.checksums = checksums;
+  }
+
+  return payload;
+}
+
+async function uploadPublishAssetToR2(
+  env: Env,
+  payload: Record<string, unknown>,
+  file: File,
+  kind: "bundle" | "manifest",
+): Promise<{ objectKey: string; url: string }> {
+  if (!toBooleanFlag(env.PUBLISH_UPLOADS_ENABLED, true)) {
+    throw new HttpError(403, "Direct file uploads are disabled for this environment.");
+  }
+
+  const publicBaseUrl = (env.PUBLISH_UPLOADS_PUBLIC_BASE_URL ?? "").trim();
+  if (!publicBaseUrl) {
+    throw new HttpError(500, "PUBLISH_UPLOADS_PUBLIC_BASE_URL is required for file uploads.");
+  }
+
+  if (!env.REGISTRY_ASSETS || typeof env.REGISTRY_ASSETS.put !== "function") {
+    throw new HttpError(500, "REGISTRY_ASSETS binding is not configured.");
+  }
+
+  const maxBytes =
+    kind === "bundle"
+      ? parseByteLimit(env.PUBLISH_UPLOADS_MAX_BUNDLE_BYTES, DEFAULT_MAX_BUNDLE_BYTES)
+      : parseByteLimit(env.PUBLISH_UPLOADS_MAX_MANIFEST_BYTES, DEFAULT_MAX_MANIFEST_BYTES);
+
+  if (file.size <= 0) {
+    throw new HttpError(400, `${kind}_file is empty.`);
+  }
+  if (file.size > maxBytes) {
+    throw new HttpError(413, `${kind}_file exceeds maximum size (${maxBytes} bytes).`);
+  }
+
+  const moduleKey = sanitizePathSegment(getRequiredPayloadString(payload, "module_key"), "module");
+  const moduleVersion = sanitizePathSegment(getRequiredPayloadString(payload, "module_version"), "version");
+  const channel = parsePayloadChannel(payload);
+  const prefix = normalizeUploadPrefix(env.PUBLISH_UPLOADS_R2_PREFIX);
+
+  const fallbackExtension = kind === "bundle" ? ".js" : ".json";
+  const extension = getFileExtension(file.name, fallbackExtension);
+  const objectKey = `${prefix}/${channel}/${moduleKey}/${moduleVersion}/${kind}${extension}`;
+
+  const fallbackContentType = kind === "bundle" ? "application/javascript" : "application/json";
+
+  await env.REGISTRY_ASSETS.put(objectKey, file, {
+    httpMetadata: {
+      contentType: file.type || fallbackContentType,
+      cacheControl: "public, max-age=31536000, immutable",
+    },
+    customMetadata: {
+      module_key: moduleKey,
+      module_version: moduleVersion,
+      channel,
+      asset_kind: kind,
+    },
+  });
+
+  return {
+    objectKey,
+    url: buildPublicAssetUrl(publicBaseUrl, objectKey),
+  };
+}
+
+async function parseMultipartPublishRequest(request: Request, env: Env): Promise<ParsedPublishRequest> {
+  const form = await request.formData();
+
+  const formPayload = parseMultipartFields(form);
+  let rawPayload: Record<string, unknown> = formPayload;
+
+  const payloadEntry = form.get("payload");
+  if (payloadEntry !== null) {
+    if (typeof payloadEntry !== "string") {
+      throw new HttpError(400, "payload field must be JSON text.");
+    }
+
+    let parsedPayload: unknown;
+    try {
+      parsedPayload = JSON.parse(payloadEntry.trim() || "{}");
+    } catch {
+      throw new HttpError(400, "payload field must contain valid JSON.");
+    }
+
+    if (!isRecord(parsedPayload)) {
+      throw new HttpError(400, "payload field must contain a JSON object.");
+    }
+
+    rawPayload = { ...formPayload, ...parsedPayload };
+  }
+
+  const bundleFile = form.get("bundle_file");
+  const manifestFile = form.get("manifest_file");
+
+  if (bundleFile !== null) {
+    if (!(bundleFile instanceof File)) {
+      throw new HttpError(400, "bundle_file must be a file.");
+    }
+    const uploaded = await uploadPublishAssetToR2(env, rawPayload, bundleFile, "bundle");
+    rawPayload.bundle_url = uploaded.url;
+  }
+
+  if (manifestFile !== null) {
+    if (!(manifestFile instanceof File)) {
+      throw new HttpError(400, "manifest_file must be a file.");
+    }
+    const uploaded = await uploadPublishAssetToR2(env, rawPayload, manifestFile, "manifest");
+    rawPayload.manifest_url = uploaded.url;
+  }
+
+  const payload = validatePublishPayload(rawPayload);
+
+  const requestBodyText = JSON.stringify({
+    payload,
+    uploads: {
+      bundle_file:
+        bundleFile instanceof File
+          ? {
+              name: bundleFile.name,
+              size: bundleFile.size,
+              type: bundleFile.type,
+            }
+          : null,
+      manifest_file:
+        manifestFile instanceof File
+          ? {
+              name: manifestFile.name,
+              size: manifestFile.size,
+              type: manifestFile.type,
+            }
+          : null,
+    },
+  });
+
+  return {
+    payload,
+    requestBodyText,
+  };
+}
+
+async function parseJsonPublishRequest(request: Request): Promise<ParsedPublishRequest> {
+  const bodyText = await request.text();
+
+  if (bodyText.length > MAX_JSON_PUBLISH_BODY_BYTES) {
+    throw new HttpError(413, "Publish payload too large.");
+  }
+
+  let rawPayload: unknown;
+  try {
+    rawPayload = JSON.parse(bodyText || "{}");
+  } catch {
+    throw new HttpError(400, "Publish payload must be valid JSON.");
+  }
+
+  const payload = validatePublishPayload(rawPayload);
+  return {
+    payload,
+    requestBodyText: bodyText || "{}",
+  };
+}
+
+async function parsePublishRequest(request: Request, env: Env): Promise<ParsedPublishRequest> {
+  const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
+  if (contentType.includes("multipart/form-data")) {
+    return parseMultipartPublishRequest(request, env);
+  }
+  return parseJsonPublishRequest(request);
 }
 
 function buildErrorResponse(error: unknown): Response {
@@ -144,23 +458,10 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
 
   if (request.method === "POST" && pathname === "/v1/modules/publish") {
     const principal = await requireGooglePublishAuth(request, env);
-    const bodyText = await request.text();
-
-    if (bodyText.length > 1024 * 1024) {
-      throw new HttpError(413, "Publish payload too large.");
-    }
-
-    let rawPayload: unknown;
-    try {
-      rawPayload = JSON.parse(bodyText || "{}");
-    } catch {
-      throw new HttpError(400, "Publish payload must be valid JSON");
-    }
-
-    const payload = validatePublishPayload(rawPayload);
+    const { payload, requestBodyText } = await parsePublishRequest(request, env);
     const idempotencyKey = request.headers.get("x-idempotency-key");
-    const result = await publishModuleVersion(env.REGISTRY_DB, payload, principal, bodyText, idempotencyKey);
 
+    const result = await publishModuleVersion(env.REGISTRY_DB, payload, principal, requestBodyText, idempotencyKey);
     return jsonResponse(result, 200, API_HEADERS);
   }
 

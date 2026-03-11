@@ -18,6 +18,16 @@ output "d1_registry_production_id" {
   description = "Production D1 registry database UUID."
 }
 
+output "r2_assets_bucket_preview_name" {
+  value       = local.r2_assets_bucket_preview_name
+  description = "Preview R2 bucket name for module uploads."
+}
+
+output "r2_assets_bucket_production_name" {
+  value       = local.r2_assets_bucket_production_name
+  description = "Production R2 bucket name for module uploads."
+}
+
 output "active_deployment_environment" {
   value       = local.deployment_environment
   description = "Active deployment environment for this workspace run."

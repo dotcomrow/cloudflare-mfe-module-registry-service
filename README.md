@@ -16,7 +16,7 @@ Cloudflare Worker + D1 service for MFE catalog management.
 - `GET /api/modules?channel=all|preview|prod&q=<search>&limit=100&offset=0`
 - `GET /api/modules/:module_key`
 - `GET /api/modules/:module_key/:module_version?channel=preview|prod`
-- `POST /v1/modules/publish` (Google-auth protected)
+- `POST /v1/modules/publish` (Google-auth protected, supports JSON metadata or multipart file upload)
 
 `POST /v1/modules/publish` accepts the payload emitted by `example-mfe/scripts/notify-catalog-service.mjs`:
 
@@ -44,6 +44,39 @@ Cloudflare Worker + D1 service for MFE catalog management.
 ```
 
 The service fetches `definition.url` and `seed.url` (if present) to enrich catalog metadata.
+
+### Publish With Direct File Upload
+
+`POST /v1/modules/publish` also supports `multipart/form-data` and can upload:
+
+- `bundle_file` (JavaScript bundle)
+- `manifest_file` (publish manifest JSON)
+
+When files are sent, the API uploads them to R2 (`REGISTRY_ASSETS`) and automatically sets `bundle_url` / `manifest_url` before storing publish metadata.
+
+Required multipart text fields:
+
+- `module_key`
+- `module_version`
+- `channel` (`preview` or `prod`)
+
+Optional text fields:
+
+- `published_at`, `provider`, `component_type`
+- `release`, `definition`, `seed`, `checksums` (JSON strings)
+
+Example:
+
+```bash
+curl -X POST "https://<host>/v1/modules/publish" \
+  -H "Authorization: Bearer <google-token>" \
+  -H "x-idempotency-key: <unique-key>" \
+  -F "module_key=mfe-example-chat" \
+  -F "module_version=v1.0.1" \
+  -F "channel=preview" \
+  -F "bundle_file=@./dist/example-mfe.js;type=application/javascript" \
+  -F "manifest_file=@./dist/module.publish.json;type=application/json"
+```
 
 ## Google Auth For Publish API
 
@@ -94,8 +127,8 @@ Deployments are Terraform-first and run through GitHub Actions.
 
 1. `.github/workflows/initial-deploy.yml` bootstraps Terraform Cloud workspaces (`<repo>` and `<repo>-preview`), uploads `terraform/`, creates the first apply run, then disables itself.
 2. `.github/workflows/terraform-deploy.yml` runs on branch pushes:
-   - `prod` -> workspace `<repo>` -> `deployment_environment=production` and `manage_d1_resources=true`
-   - `dev` -> workspace `<repo>-preview` -> `deployment_environment=preview` and `manage_d1_resources=false`
+   - `prod` -> workspace `<repo>` -> `deployment_environment=production`, `manage_d1_resources=true`, `manage_r2_resources=true`
+   - `dev` -> workspace `<repo>-preview` -> `deployment_environment=preview`, `manage_d1_resources=false`, `manage_r2_resources=false`
 3. The workflow bundles Worker code with `wrangler deploy --dry-run` into `terraform/worker-build/index.js`, then Terraform deploys:
    - `cloudflare_worker`
    - `cloudflare_worker_version`
@@ -127,6 +160,7 @@ Optional Terraform variables:
 - `cloudflare_zone_id` (required only when `manage_worker_domains=true` or `manage_worker_routes=true`)
 - `domain`, `worker_service_name_production`, `worker_service_name_preview`, `worker_preview_hostname`
 - `manage_worker_domains`, `manage_worker_routes`
+- `manage_r2_resources`, `r2_dev_assets_bucket_name`, `r2_prod_assets_bucket_name`
 - `worker_production_route_pattern`, `worker_preview_route_pattern`
 - `google_auth_allowed_audiences`, `google_auth_allowed_emails`, `google_auth_allowed_domains`
 - `google_auth_allowed_groups`
@@ -134,6 +168,12 @@ Optional Terraform variables:
 - `google_auth_groups_service_account_private_key` (sensitive)
 - `google_auth_groups_impersonated_user`
 - `google_auth_groups_cache_ttl_seconds`
+- `publish_uploads_enabled`
+- `publish_uploads_public_base_url_preview`, `publish_uploads_public_base_url_production`
+- `publish_uploads_r2_prefix`
+- `publish_uploads_max_bundle_bytes`, `publish_uploads_max_manifest_bytes`
+
+If `publish_uploads_enabled=true`, both `publish_uploads_public_base_url_preview` and `publish_uploads_public_base_url_production` must be set.
 
 ## Wrangler Deploy (Optional)
 
