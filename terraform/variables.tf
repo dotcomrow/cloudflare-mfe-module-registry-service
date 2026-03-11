@@ -95,7 +95,7 @@ variable "worker_preview_hostname" {
 variable "manage_worker_domains" {
   type        = bool
   description = "When true, Terraform manages Workers custom domain mappings."
-  default     = false
+  default     = true
 }
 
 variable "manage_worker_routes" {
