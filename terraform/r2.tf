@@ -23,9 +23,11 @@ locals {
   r2_assets_bucket_production_name = var.manage_r2_resources ? cloudflare_r2_bucket.assets_production[0].name : var.r2_prod_assets_bucket_name
   active_r2_assets_bucket_name     = local.is_preview_deployment ? local.r2_assets_bucket_preview_name : local.r2_assets_bucket_production_name
 
-  active_publish_uploads_public_base_url = local.is_preview_deployment
+  active_publish_uploads_public_base_url = (
+    local.is_preview_deployment
     ? trimspace(var.publish_uploads_public_base_url_preview)
     : trimspace(var.publish_uploads_public_base_url_production)
+  )
 }
 
 moved {
