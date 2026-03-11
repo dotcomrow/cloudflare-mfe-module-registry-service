@@ -154,7 +154,7 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
     try {
       rawPayload = JSON.parse(bodyText || "{}");
     } catch {
-      throw new HttpError(400, "Publish payload must be valid JSON document.");
+      throw new HttpError(400, "Publish payload must be valid JSON");
     }
 
     const payload = validatePublishPayload(rawPayload);
