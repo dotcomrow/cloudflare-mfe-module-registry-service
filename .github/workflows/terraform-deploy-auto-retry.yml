@@ -34,45 +34,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          is_timeout_failure() {
-            local run_id="$1"
-            local workdir
-            local logs_zip
-            local logs_dir
-            local downloaded="false"
-
-            workdir="$(mktemp -d)"
-            logs_zip="${workdir}/logs.zip"
-            logs_dir="${workdir}/logs"
-
-            for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-              if gh api "/repos/${OWNER}/${REPO}/actions/runs/${run_id}/logs" > "${logs_zip}"; then
-                downloaded="true"
-                break
-              fi
-              echo "Run ${run_id} logs not ready yet, retrying in 10s (${i}/12)."
-              sleep 10
-            done
-
-            if [ "${downloaded}" != "true" ]; then
-              echo "Could not download logs for run ${run_id}."
-              rm -rf "${workdir}"
-              return 1
-            fi
-
-            unzip -q "${logs_zip}" -d "${logs_dir}"
-
-            if grep -R -n -F "Failed to request discovery document" "${logs_dir}" >/dev/null \
-              || grep -R -n -F "https://app.terraform.io/.well-known/terraform.json" "${logs_dir}" >/dev/null \
-              || grep -R -n -F "context deadline exceeded (Client.Timeout exceeded while awaiting headers)" "${logs_dir}" >/dev/null; then
-              rm -rf "${workdir}"
-              return 0
-            fi
-
-            rm -rf "${workdir}"
-            return 1
-          }
-
           dispatch_branch_if_idle() {
             local branch="$1"
             local latest_json
@@ -113,15 +74,9 @@ jobs:
               return 0
             fi
 
-            echo "Evaluating failed Terraform Deploy run ${run_id} on branch '${branch}'."
-            if is_timeout_failure "${run_id}"; then
-              echo "Detected Terraform Cloud discovery timeout in run ${run_id}. Waiting 120s before retry dispatch."
-              sleep 120
-              dispatch_branch_if_idle "${branch}"
-              return 0
-            fi
-
-            echo "Run ${run_id} did not match timeout signature; no retry requested."
+            echo "Retrying failed Terraform Deploy run ${run_id} on branch '${branch}' after 120s."
+            sleep 120
+            dispatch_branch_if_idle "${branch}"
             return 0
           }
 
@@ -154,13 +109,8 @@ jobs:
               return 0
             fi
 
-            if is_timeout_failure "${run_id}"; then
-              echo "Latest failed run ${run_id} on '${branch}' matches timeout signature. Dispatching retry."
-              dispatch_branch_if_idle "${branch}"
-              return 0
-            fi
-
-            echo "Latest failed run ${run_id} on '${branch}' is not the timeout signature; no retry requested."
+            echo "Latest failed run ${run_id} on '${branch}' will be retried."
+            dispatch_branch_if_idle "${branch}"
             return 0
           }
 
