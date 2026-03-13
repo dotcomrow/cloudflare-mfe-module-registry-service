@@ -1,0 +1,179 @@
+name: Terraform Deploy Auto Retry
+
+on:
+  workflow_run:
+    workflows:
+      - Terraform Deploy
+    branches:
+      - dev
+      - prod
+    types:
+      - completed
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  rerun-on-tfc-discovery-timeout:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Evaluate Terraform Deploy failures and optionally rerun
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+
+          is_timeout_failure() {
+            local run_id="$1"
+            local workdir
+            local logs_zip
+            local logs_dir
+            local downloaded="false"
+
+            workdir="$(mktemp -d)"
+            logs_zip="${workdir}/logs.zip"
+            logs_dir="${workdir}/logs"
+
+            for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+              if gh api "/repos/${OWNER}/${REPO}/actions/runs/${run_id}/logs" > "${logs_zip}"; then
+                downloaded="true"
+                break
+              fi
+              echo "Run ${run_id} logs not ready yet, retrying in 10s (${i}/12)."
+              sleep 10
+            done
+
+            if [ "${downloaded}" != "true" ]; then
+              echo "Could not download logs for run ${run_id}."
+              rm -rf "${workdir}"
+              return 1
+            fi
+
+            unzip -q "${logs_zip}" -d "${logs_dir}"
+
+            if grep -R -n -F "Failed to request discovery document" "${logs_dir}" >/dev/null \
+              || grep -R -n -F "https://app.terraform.io/.well-known/terraform.json" "${logs_dir}" >/dev/null \
+              || grep -R -n -F "context deadline exceeded (Client.Timeout exceeded while awaiting headers)" "${logs_dir}" >/dev/null; then
+              rm -rf "${workdir}"
+              return 0
+            fi
+
+            rm -rf "${workdir}"
+            return 1
+          }
+
+          dispatch_branch_if_idle() {
+            local branch="$1"
+            local latest_json
+            local latest_status
+
+            if [ -z "${branch}" ]; then
+              echo "Branch is empty; cannot dispatch retry."
+              return 0
+            fi
+
+            if [ "${branch}" != "dev" ] && [ "${branch}" != "prod" ]; then
+              echo "Branch '${branch}' is not a deploy branch; skipping."
+              return 0
+            fi
+
+            latest_json="$(gh run list -R "${OWNER}/${REPO}" --workflow "Terraform Deploy" --branch "${branch}" --limit 1 --json databaseId,status,conclusion,createdAt,url || true)"
+            if [ -z "${latest_json}" ] || [ "$(echo "${latest_json}" | jq 'length')" -eq 0 ]; then
+              echo "No Terraform Deploy runs found for branch '${branch}'."
+            else
+              latest_status="$(echo "${latest_json}" | jq -r '.[0].status')"
+              if [ "${latest_status}" = "in_progress" ] || [ "${latest_status}" = "queued" ]; then
+                echo "Latest Terraform Deploy on '${branch}' is ${latest_status}; skipping dispatch."
+                return 0
+              fi
+            fi
+
+            echo "Dispatching Terraform Deploy on branch '${branch}'."
+            gh api --method POST "/repos/${OWNER}/${REPO}/actions/workflows/terraform-deploy.yml/dispatches" -f ref="${branch}"
+            return 0
+          }
+
+          handle_specific_failed_run() {
+            local run_id="$1"
+            local branch="$2"
+
+            if [ -z "${run_id}" ] || [ "${run_id}" = "null" ]; then
+              echo "workflow_run payload did not include a run id; nothing to do."
+              return 0
+            fi
+
+            echo "Evaluating failed Terraform Deploy run ${run_id} on branch '${branch}'."
+            if is_timeout_failure "${run_id}"; then
+              echo "Detected Terraform Cloud discovery timeout in run ${run_id}. Waiting 120s before retry dispatch."
+              sleep 120
+              dispatch_branch_if_idle "${branch}"
+              return 0
+            fi
+
+            echo "Run ${run_id} did not match timeout signature; no retry requested."
+            return 0
+          }
+
+          handle_latest_failed_run_for_branch() {
+            local branch="$1"
+            local latest_json
+            local run_id
+            local run_status
+            local run_conclusion
+
+            latest_json="$(gh run list -R "${OWNER}/${REPO}" --workflow "Terraform Deploy" --branch "${branch}" --limit 1 --json databaseId,status,conclusion,createdAt,url || true)"
+            if [ -z "${latest_json}" ] || [ "$(echo "${latest_json}" | jq 'length')" -eq 0 ]; then
+              echo "No Terraform Deploy run history found for '${branch}'."
+              return 0
+            fi
+
+            run_id="$(echo "${latest_json}" | jq -r '.[0].databaseId')"
+            run_status="$(echo "${latest_json}" | jq -r '.[0].status')"
+            run_conclusion="$(echo "${latest_json}" | jq -r '.[0].conclusion // ""')"
+
+            echo "Latest Terraform Deploy for '${branch}': run=${run_id} status=${run_status} conclusion=${run_conclusion}"
+
+            if [ "${run_status}" != "completed" ]; then
+              echo "Branch '${branch}' currently has a deploy ${run_status}; no action needed."
+              return 0
+            fi
+
+            if [ "${run_conclusion}" != "failure" ]; then
+              echo "Latest deploy for '${branch}' is not a failure; no action needed."
+              return 0
+            fi
+
+            if is_timeout_failure "${run_id}"; then
+              echo "Latest failed run ${run_id} on '${branch}' matches timeout signature. Dispatching retry."
+              dispatch_branch_if_idle "${branch}"
+              return 0
+            fi
+
+            echo "Latest failed run ${run_id} on '${branch}' is not the timeout signature; no retry requested."
+            return 0
+          }
+
+          echo "Event type: ${EVENT_NAME}"
+          if [ "${EVENT_NAME}" = "workflow_run" ]; then
+            if [ "${WORKFLOW_RUN_CONCLUSION}" != "failure" ]; then
+              echo "workflow_run conclusion was '${WORKFLOW_RUN_CONCLUSION}'; nothing to do."
+              exit 0
+            fi
+            handle_specific_failed_run "${WORKFLOW_RUN_ID}" "${WORKFLOW_RUN_BRANCH}"
+            exit 0
+          fi
+
+          echo "Polling latest deploy failures for dev/prod."
+          handle_latest_failed_run_for_branch "dev"
+          handle_latest_failed_run_for_branch "prod"
