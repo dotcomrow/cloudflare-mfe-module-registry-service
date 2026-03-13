@@ -20,7 +20,6 @@ permissions:
 jobs:
   retry-until-success:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'workflow_run' || matrix.branch == github.event.workflow_run.head_branch }}
     strategy:
       fail-fast: false
       matrix:
