@@ -18,112 +18,135 @@ permissions:
   contents: read
 
 jobs:
-  rerun-on-tfc-discovery-timeout:
+  retry-until-success:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        branch:
+          - dev
+          - prod
+    concurrency:
+      group: terraform-deploy-auto-retry-${{ matrix.branch }}
+      cancel-in-progress: false
 
     steps:
-      - name: Evaluate Terraform Deploy failures and optionally rerun
+      - name: Retry failed Terraform deploys until successful
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.ACTIONS_BOT_TOKEN || github.token }}
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.event.repository.name }}
           EVENT_NAME: ${{ github.event_name }}
-          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          BRANCH: ${{ matrix.branch }}
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
 
-          dispatch_branch_if_idle() {
-            local branch="$1"
-            local latest_json
-            local latest_status
-
-            if [ -z "${branch}" ]; then
-              echo "Branch is empty; cannot dispatch retry."
+          should_monitor_branch() {
+            if [ "${EVENT_NAME}" != "workflow_run" ]; then
               return 0
             fi
 
-            if [ "${branch}" != "dev" ] && [ "${branch}" != "prod" ]; then
-              echo "Branch '${branch}' is not a deploy branch; skipping."
-              return 0
+            if [ "${WORKFLOW_RUN_BRANCH}" != "${BRANCH}" ]; then
+              echo "workflow_run was for '${WORKFLOW_RUN_BRANCH}', this job is '${BRANCH}'. Skipping."
+              return 1
             fi
 
-            latest_json="$(gh run list -R "${OWNER}/${REPO}" --workflow "Terraform Deploy" --branch "${branch}" --limit 1 --json databaseId,status,conclusion,createdAt,url || true)"
-            if [ -z "${latest_json}" ] || [ "$(echo "${latest_json}" | jq 'length')" -eq 0 ]; then
-              echo "No Terraform Deploy runs found for branch '${branch}'."
-            else
-              latest_status="$(echo "${latest_json}" | jq -r '.[0].status')"
-              if [ "${latest_status}" = "in_progress" ] || [ "${latest_status}" = "queued" ]; then
-                echo "Latest Terraform Deploy on '${branch}' is ${latest_status}; skipping dispatch."
-                return 0
-              fi
+            if [ "${WORKFLOW_RUN_CONCLUSION}" != "failure" ]; then
+              echo "workflow_run conclusion for '${BRANCH}' was '${WORKFLOW_RUN_CONCLUSION}'. Nothing to retry."
+              return 1
             fi
 
-            echo "Dispatching Terraform Deploy on branch '${branch}'."
-            gh api --method POST "/repos/${OWNER}/${REPO}/actions/workflows/terraform-deploy.yml/dispatches" -f ref="${branch}"
             return 0
           }
 
-          handle_specific_failed_run() {
-            local run_id="$1"
-            local branch="$2"
-
-            if [ -z "${run_id}" ] || [ "${run_id}" = "null" ]; then
-              echo "workflow_run payload did not include a run id; nothing to do."
-              return 0
-            fi
-
-            echo "Retrying failed Terraform Deploy run ${run_id} on branch '${branch}' after 120s."
-            sleep 120
-            dispatch_branch_if_idle "${branch}"
-            return 0
+          latest_run_json() {
+            gh run list -R "${OWNER}/${REPO}" \
+              --workflow "Terraform Deploy" \
+              --branch "${BRANCH}" \
+              --limit 1 \
+              --json databaseId,status,conclusion,createdAt,url,event || echo "[]"
           }
 
-          handle_latest_failed_run_for_branch() {
-            local branch="$1"
+          dispatch_branch() {
+            echo "Dispatching Terraform Deploy on branch '${BRANCH}'."
+            gh api --method POST "/repos/${OWNER}/${REPO}/actions/workflows/terraform-deploy.yml/dispatches" -f ref="${BRANCH}" >/dev/null
+          }
+
+          monitor_branch_until_success() {
             local latest_json
             local run_id
-            local run_status
+            local latest_status
             local run_conclusion
+            local previous_failed_run_id=""
+            local wait_count=0
 
-            latest_json="$(gh run list -R "${OWNER}/${REPO}" --workflow "Terraform Deploy" --branch "${branch}" --limit 1 --json databaseId,status,conclusion,createdAt,url || true)"
-            if [ -z "${latest_json}" ] || [ "$(echo "${latest_json}" | jq 'length')" -eq 0 ]; then
-              echo "No Terraform Deploy run history found for '${branch}'."
-              return 0
-            fi
+            while true; do
+              latest_json="$(latest_run_json)"
+              if [ -z "${latest_json}" ] || [ "$(echo "${latest_json}" | jq 'length')" -eq 0 ]; then
+                echo "No Terraform Deploy runs found for '${BRANCH}'. Waiting 20s."
+                sleep 20
+                continue
+              fi
 
-            run_id="$(echo "${latest_json}" | jq -r '.[0].databaseId')"
-            run_status="$(echo "${latest_json}" | jq -r '.[0].status')"
-            run_conclusion="$(echo "${latest_json}" | jq -r '.[0].conclusion // ""')"
+              run_id="$(echo "${latest_json}" | jq -r '.[0].databaseId')"
+              latest_status="$(echo "${latest_json}" | jq -r '.[0].status')"
+              run_conclusion="$(echo "${latest_json}" | jq -r '.[0].conclusion // ""')"
 
-            echo "Latest Terraform Deploy for '${branch}': run=${run_id} status=${run_status} conclusion=${run_conclusion}"
+              echo "Branch '${BRANCH}' latest run=${run_id} status=${latest_status} conclusion=${run_conclusion}"
 
-            if [ "${run_status}" != "completed" ]; then
-              echo "Branch '${branch}' currently has a deploy ${run_status}; no action needed."
-              return 0
-            fi
+              if [ "${latest_status}" = "in_progress" ] || [ "${latest_status}" = "queued" ]; then
+                sleep 20
+                continue
+              fi
 
-            if [ "${run_conclusion}" != "failure" ]; then
-              echo "Latest deploy for '${branch}' is not a failure; no action needed."
-              return 0
-            fi
+              if [ "${run_conclusion}" = "success" ]; then
+                echo "Branch '${BRANCH}' latest run succeeded. Retry loop complete."
+                return 0
+              fi
 
-            echo "Latest failed run ${run_id} on '${branch}' will be retried."
-            dispatch_branch_if_idle "${branch}"
-            return 0
+              if [ "${run_conclusion}" = "failure" ] || [ "${run_conclusion}" = "cancelled" ] || [ "${run_conclusion}" = "timed_out" ] || [ "${run_conclusion}" = "startup_failure" ]; then
+                if [ "${previous_failed_run_id}" = "${run_id}" ]; then
+                  sleep 20
+                  continue
+                fi
+
+                previous_failed_run_id="${run_id}"
+                dispatch_branch
+                wait_count=0
+
+                while true; do
+                  sleep 15
+                  latest_json="$(latest_run_json)"
+                  if [ -z "${latest_json}" ] || [ "$(echo "${latest_json}" | jq 'length')" -eq 0 ]; then
+                    continue
+                  fi
+
+                  run_id="$(echo "${latest_json}" | jq -r '.[0].databaseId')"
+                  if [ "${run_id}" != "${previous_failed_run_id}" ]; then
+                    echo "Detected new Terraform Deploy run ${run_id} on '${BRANCH}'."
+                    break
+                  fi
+
+                  wait_count=$((wait_count + 1))
+                  if [ "${wait_count}" -ge 40 ]; then
+                    echo "Dispatched run not visible yet on '${BRANCH}'. Re-dispatching."
+                    dispatch_branch
+                    wait_count=0
+                  fi
+                done
+                continue
+              fi
+
+              echo "Branch '${BRANCH}' has non-retryable conclusion '${run_conclusion}'. Waiting 20s."
+              sleep 20
+            done
           }
 
-          echo "Event type: ${EVENT_NAME}"
-          if [ "${EVENT_NAME}" = "workflow_run" ]; then
-            if [ "${WORKFLOW_RUN_CONCLUSION}" != "failure" ]; then
-              echo "workflow_run conclusion was '${WORKFLOW_RUN_CONCLUSION}'; nothing to do."
-              exit 0
-            fi
-            handle_specific_failed_run "${WORKFLOW_RUN_ID}" "${WORKFLOW_RUN_BRANCH}"
+          if ! should_monitor_branch; then
             exit 0
           fi
 
-          echo "Polling latest deploy failures for dev/prod."
-          handle_latest_failed_run_for_branch "dev"
-          handle_latest_failed_run_for_branch "prod"
+          echo "Starting retry monitor for branch '${BRANCH}' (event=${EVENT_NAME})."
+          monitor_branch_until_success
