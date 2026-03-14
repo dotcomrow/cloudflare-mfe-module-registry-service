@@ -135,8 +135,12 @@ export function renderIndexHtml(serviceTitle: string): string {
     }
 
     .detail-scroll {
-      overflow-y: scroll;
+      height: calc(100vh - 240px);
+      max-height: calc(100vh - 240px);
+      overflow-y: auto;
+      overflow-x: hidden;
       scrollbar-gutter: stable;
+      overscroll-behavior: contain;
     }
 
     .module-item {
@@ -296,6 +300,7 @@ export function renderIndexHtml(serviceTitle: string): string {
       .toolbar { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
       .list-scroll, .detail-scroll { max-height: none; }
+      .detail-scroll { height: auto; overflow-y: visible; }
       .kv { grid-template-columns: 1fr; }
     }
   </style>
