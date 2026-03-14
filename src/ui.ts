@@ -37,15 +37,18 @@ export function renderIndexHtml(serviceTitle: string): string {
       font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: var(--text);
       background: linear-gradient(180deg, #f8fafc 0%, #eff6ff 100%);
-      min-height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
     }
 
     .shell {
-      max-width: 1320px;
+      max-width: 1440px;
       margin: 0 auto;
-      padding: 24px;
+      padding: 20px;
+      height: 100%;
       display: grid;
-      gap: 16px;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 14px;
     }
 
     .toolbar {
@@ -79,8 +82,8 @@ export function renderIndexHtml(serviceTitle: string): string {
       background: #fff;
       color: var(--text);
       border-radius: 10px;
-      padding: 0.6rem 0.8rem;
-      font-size: 0.95rem;
+      padding: 0.7rem 0.9rem;
+      font-size: 1rem;
     }
 
     input[type="search"] { width: 100%; }
@@ -101,9 +104,9 @@ export function renderIndexHtml(serviceTitle: string): string {
 
     .grid {
       display: grid;
-      grid-template-columns: minmax(320px, 420px) 1fr;
+      grid-template-columns: minmax(360px, 500px) 1fr;
       gap: 16px;
-      min-height: 70vh;
+      min-height: 0;
     }
 
     .panel {
@@ -114,7 +117,7 @@ export function renderIndexHtml(serviceTitle: string): string {
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      min-height: 300px;
+      min-height: 0;
     }
 
     .panel-header {
@@ -127,11 +130,14 @@ export function renderIndexHtml(serviceTitle: string): string {
 
     .list-scroll,
     .detail-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
       overflow: auto;
-      max-height: calc(100vh - 240px);
-      padding: 10px;
+      padding: 12px;
       display: grid;
       gap: 10px;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable both-edges;
     }
 
     .module-item {
@@ -234,8 +240,38 @@ export function renderIndexHtml(serviceTitle: string): string {
       padding: 10px;
       overflow: auto;
       max-height: 280px;
-      font-size: 12px;
+      font-size: 13px;
       line-height: 1.45;
+      scrollbar-gutter: stable both-edges;
+    }
+
+    .list-scroll,
+    .detail-scroll,
+    pre {
+      scrollbar-width: auto;
+      scrollbar-color: #94a3b8 #e2e8f0;
+    }
+
+    .list-scroll::-webkit-scrollbar,
+    .detail-scroll::-webkit-scrollbar,
+    pre::-webkit-scrollbar {
+      width: 12px;
+      height: 12px;
+    }
+
+    .list-scroll::-webkit-scrollbar-thumb,
+    .detail-scroll::-webkit-scrollbar-thumb,
+    pre::-webkit-scrollbar-thumb {
+      background: #94a3b8;
+      border-radius: 999px;
+      border: 2px solid #e2e8f0;
+    }
+
+    .list-scroll::-webkit-scrollbar-track,
+    .detail-scroll::-webkit-scrollbar-track,
+    pre::-webkit-scrollbar-track {
+      background: #e2e8f0;
+      border-radius: 999px;
     }
 
     .versions {
@@ -282,9 +318,19 @@ export function renderIndexHtml(serviceTitle: string): string {
     }
 
     @media (max-width: 980px) {
+      body {
+        height: auto;
+        min-height: 100vh;
+        overflow: auto;
+      }
+      .shell {
+        height: auto;
+        min-height: 100vh;
+        padding: 14px;
+      }
       .toolbar { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
-      .list-scroll, .detail-scroll { max-height: none; }
+      .panel { min-height: 360px; }
       .kv { grid-template-columns: 1fr; }
     }
   </style>
