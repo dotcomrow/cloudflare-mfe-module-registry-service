@@ -53,6 +53,7 @@ The service fetches `definition.url` and `seed.url` (if present) to enrich catal
 - `manifest_file` (publish manifest JSON)
 
 When files are sent, the API uploads them to R2 (`REGISTRY_ASSETS`) and automatically sets `bundle_url` / `manifest_url` before storing publish metadata.
+By default, uploaded asset URLs are served from the same Worker origin at `/assets/<object-key>`.
 
 Required multipart text fields:
 
@@ -128,7 +129,7 @@ Deployments are Terraform-first and run through GitHub Actions.
 1. `.github/workflows/initial-deploy.yml` bootstraps Terraform Cloud workspaces (`<repo>` and `<repo>-preview`), uploads `terraform/`, creates the first apply run, then disables itself.
 2. `.github/workflows/terraform-deploy.yml` runs on branch pushes:
    - `prod` -> workspace `<repo>` -> `deployment_environment=production`, `manage_d1_resources=true`, `manage_r2_resources=true`
-   - `dev` -> workspace `<repo>-preview` -> `deployment_environment=preview`, `manage_d1_resources=false`, `manage_r2_resources=false`
+   - `dev` -> workspace `<repo>-preview` -> `deployment_environment=preview`, `manage_d1_resources=false`, `manage_r2_resources=true`
 3. The workflow bundles Worker code with `wrangler deploy --dry-run` into `terraform/worker-build/index.js`, then Terraform deploys:
    - `cloudflare_worker`
    - `cloudflare_worker_version`
@@ -169,11 +170,11 @@ Optional Terraform variables:
 - `google_auth_groups_impersonated_user`
 - `google_auth_groups_cache_ttl_seconds`
 - `publish_uploads_enabled`
-- `publish_uploads_public_base_url_preview`, `publish_uploads_public_base_url_production`
+- `publish_uploads_public_base_url_preview`, `publish_uploads_public_base_url_production` (optional URL overrides)
 - `publish_uploads_r2_prefix`
 - `publish_uploads_max_bundle_bytes`, `publish_uploads_max_manifest_bytes`
 
-If `publish_uploads_enabled=true`, both `publish_uploads_public_base_url_preview` and `publish_uploads_public_base_url_production` must be set.
+If base URL overrides are not provided, uploads automatically use `<worker-origin>/assets/...`.
 
 ## Wrangler Deploy (Optional)
 

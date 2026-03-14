@@ -50,7 +50,7 @@ jobs:
             echo "workspace=${PREVIEW_WORKSPACE}" >> "$GITHUB_OUTPUT"
             echo "deployment_environment=preview" >> "$GITHUB_OUTPUT"
             echo "manage_d1_resources=false" >> "$GITHUB_OUTPUT"
-            echo "manage_r2_resources=false" >> "$GITHUB_OUTPUT"
+            echo "manage_r2_resources=true" >> "$GITHUB_OUTPUT"
             echo "wrangler_env=preview" >> "$GITHUB_OUTPUT"
           else
             echo "Unsupported branch for deployment: ${GITHUB_REF_NAME}" >&2

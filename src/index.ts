@@ -114,6 +114,32 @@ function buildPublicAssetUrl(baseUrl: string, objectKey: string): string {
   return `${normalizedBase}/${encodedKey}`;
 }
 
+function resolvePublicAssetBaseUrl(request: Request, env: Env): string {
+  const configuredBaseUrl = (env.PUBLISH_UPLOADS_PUBLIC_BASE_URL ?? "").trim();
+  if (configuredBaseUrl) {
+    return configuredBaseUrl;
+  }
+  return `${new URL(request.url).origin}/assets`;
+}
+
+function parseAssetObjectKey(pathname: string): string {
+  const rawPath = pathname.startsWith("/assets/") ? pathname.slice("/assets/".length) : "";
+  if (!rawPath) {
+    throw new HttpError(404, "Asset path is required.");
+  }
+
+  const segments = rawPath
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map(parsePathSegment);
+
+  if (segments.length === 0) {
+    throw new HttpError(404, "Asset path is required.");
+  }
+
+  return segments.join("/");
+}
+
 function getRequiredPayloadString(payload: Record<string, unknown>, key: string): string {
   const value = payload[key];
   if (typeof value !== "string" || value.trim() === "") {
@@ -203,17 +229,13 @@ function parseMultipartFields(form: FormData): Record<string, unknown> {
 
 async function uploadPublishAssetToR2(
   env: Env,
+  publicBaseUrl: string,
   payload: Record<string, unknown>,
   file: File,
   kind: "bundle" | "manifest",
 ): Promise<{ objectKey: string; url: string }> {
   if (!toBooleanFlag(env.PUBLISH_UPLOADS_ENABLED, true)) {
     throw new HttpError(403, "Direct file uploads are disabled for this environment.");
-  }
-
-  const publicBaseUrl = (env.PUBLISH_UPLOADS_PUBLIC_BASE_URL ?? "").trim();
-  if (!publicBaseUrl) {
-    throw new HttpError(500, "PUBLISH_UPLOADS_PUBLIC_BASE_URL is required for file uploads.");
   }
 
   if (!env.REGISTRY_ASSETS || typeof env.REGISTRY_ASSETS.put !== "function") {
@@ -264,6 +286,7 @@ async function uploadPublishAssetToR2(
 
 async function parseMultipartPublishRequest(request: Request, env: Env): Promise<ParsedPublishRequest> {
   const form = await request.formData();
+  const publicBaseUrl = resolvePublicAssetBaseUrl(request, env);
 
   const formPayload = parseMultipartFields(form);
   let rawPayload: Record<string, unknown> = formPayload;
@@ -295,7 +318,7 @@ async function parseMultipartPublishRequest(request: Request, env: Env): Promise
     if (!(bundleFile instanceof File)) {
       throw new HttpError(400, "bundle_file must be a file.");
     }
-    const uploaded = await uploadPublishAssetToR2(env, rawPayload, bundleFile, "bundle");
+    const uploaded = await uploadPublishAssetToR2(env, publicBaseUrl, rawPayload, bundleFile, "bundle");
     rawPayload.bundle_url = uploaded.url;
   }
 
@@ -303,7 +326,7 @@ async function parseMultipartPublishRequest(request: Request, env: Env): Promise
     if (!(manifestFile instanceof File)) {
       throw new HttpError(400, "manifest_file must be a file.");
     }
-    const uploaded = await uploadPublishAssetToR2(env, rawPayload, manifestFile, "manifest");
+    const uploaded = await uploadPublishAssetToR2(env, publicBaseUrl, rawPayload, manifestFile, "manifest");
     rawPayload.manifest_url = uploaded.url;
   }
 
@@ -391,6 +414,30 @@ function buildErrorResponse(error: unknown): Response {
 async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const pathname = url.pathname;
+
+  if ((request.method === "GET" || request.method === "HEAD") && pathname.startsWith("/assets/")) {
+    if (!env.REGISTRY_ASSETS || typeof env.REGISTRY_ASSETS.get !== "function") {
+      throw new HttpError(500, "REGISTRY_ASSETS binding is not configured.");
+    }
+
+    const objectKey = parseAssetObjectKey(pathname);
+    const object = await env.REGISTRY_ASSETS.get(objectKey);
+    if (!object) {
+      throw new HttpError(404, "Asset not found.");
+    }
+
+    const headers = new Headers();
+    object.writeHttpMetadata(headers);
+    headers.set("etag", object.httpEtag);
+    if (!headers.has("cache-control")) {
+      headers.set("cache-control", "public, max-age=31536000, immutable");
+    }
+
+    return new Response(request.method === "HEAD" ? null : object.body, {
+      status: 200,
+      headers,
+    });
+  }
 
   if (request.method === "GET" && pathname === "/healthz") {
     return jsonResponse(

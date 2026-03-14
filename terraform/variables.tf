@@ -281,13 +281,13 @@ variable "publish_uploads_enabled" {
 
 variable "publish_uploads_public_base_url_preview" {
   type        = string
-  description = "Preview public base URL for uploaded R2 assets."
+  description = "Optional preview public base URL override for uploaded assets. Defaults to the Worker origin + /assets."
   default     = ""
 }
 
 variable "publish_uploads_public_base_url_production" {
   type        = string
-  description = "Production public base URL for uploaded R2 assets."
+  description = "Optional production public base URL override for uploaded assets. Defaults to the Worker origin + /assets."
   default     = ""
 }
 
