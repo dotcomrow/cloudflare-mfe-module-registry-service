@@ -67,8 +67,13 @@ resource "cloudflare_worker_version" "app" {
     },
     {
       type = "plain_text"
+      name = "GOOGLE_AUTH_ALLOWED_AUDIENCE"
+      text = var.google_auth_allowed_audience
+    },
+    {
+      type = "plain_text"
       name = "GOOGLE_AUTH_ALLOWED_AUDIENCES"
-      text = var.google_auth_allowed_audiences
+      text = local.google_auth_allowed_audiences_effective
     },
     {
       type = "plain_text"
@@ -79,26 +84,6 @@ resource "cloudflare_worker_version" "app" {
       type = "plain_text"
       name = "GOOGLE_AUTH_ALLOWED_DOMAINS"
       text = var.google_auth_allowed_domains
-    },
-    {
-      type = "plain_text"
-      name = "GOOGLE_AUTH_ALLOWED_GROUPS"
-      text = var.google_auth_allowed_groups
-    },
-    {
-      type = "plain_text"
-      name = "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_EMAIL"
-      text = var.google_auth_groups_service_account_email
-    },
-    {
-      type = "plain_text"
-      name = "GOOGLE_AUTH_GROUPS_IMPERSONATED_USER"
-      text = var.google_auth_groups_impersonated_user
-    },
-    {
-      type = "plain_text"
-      name = "GOOGLE_AUTH_GROUPS_CACHE_TTL_SECONDS"
-      text = tostring(var.google_auth_groups_cache_ttl_seconds)
     },
     {
       type = "plain_text"
@@ -126,9 +111,34 @@ resource "cloudflare_worker_version" "app" {
       text = tostring(var.publish_uploads_max_manifest_bytes)
     },
     {
-      type = "secret_text"
-      name = "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_PRIVATE_KEY"
-      text = var.google_auth_groups_service_account_private_key
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_STRICT"
+      text = var.publish_validation_strict
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_REQUIRE_PROPS_SCHEMA"
+      text = var.publish_validation_require_props_schema
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_REQUIRE_DEFAULT_PROPS"
+      text = var.publish_validation_require_default_props
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_VERIFY_ASSET_URLS"
+      text = var.publish_validation_verify_asset_urls
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_VALIDATE_MANIFEST"
+      text = var.publish_validation_validate_manifest
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_TIMEOUT_MS"
+      text = tostring(var.publish_validation_timeout_ms)
     }
   ]
 
@@ -138,12 +148,10 @@ resource "cloudflare_worker_version" "app" {
       error_message = "Missing bundled Worker entrypoint at ${local.worker_entry_file}. Run wrangler deploy --dry-run to terraform/worker-build before Terraform apply."
     }
     precondition {
-      condition = trimspace(var.google_auth_allowed_groups) == "" || (
-        trimspace(var.google_auth_groups_service_account_email) != "" &&
-        trimspace(var.google_auth_groups_service_account_private_key) != "" &&
-        trimspace(var.google_auth_groups_impersonated_user) != ""
+      condition = trimspace(var.google_auth_allowed_audience) == "" || trimspace(var.google_auth_allowed_audiences) == "" || (
+        trimspace(var.google_auth_allowed_audience) == trimspace(var.google_auth_allowed_audiences)
       )
-      error_message = "When google_auth_allowed_groups is set, you must also set google_auth_groups_service_account_email, google_auth_groups_service_account_private_key, and google_auth_groups_impersonated_user."
+      error_message = "google_auth_allowed_audience and google_auth_allowed_audiences cannot conflict; use one shared audience value."
     }
   }
 }

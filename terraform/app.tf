@@ -11,6 +11,7 @@ locals {
 
   active_worker_service_name = local.is_preview_deployment ? local.worker_service_name_preview : local.worker_service_name_production
   active_runtime_environment = local.is_preview_deployment ? var.environment_name_preview : var.environment_name_production
+  google_auth_allowed_audiences_effective = trimspace(var.google_auth_allowed_audience) != "" ? trimspace(var.google_auth_allowed_audience) : trimspace(var.google_auth_allowed_audiences)
 
   app_route_pattern = trimspace(var.worker_production_route_pattern) != "" ? trimspace(var.worker_production_route_pattern) : (
     trimspace(var.worker_domain_environment_production) != "" ? trimspace(var.worker_domain_environment_production) : (

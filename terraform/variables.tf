@@ -224,9 +224,20 @@ variable "google_auth_enabled" {
   default     = "true"
 }
 
+variable "google_auth_allowed_audience" {
+  type        = string
+  description = "Single shared audience value for GOOGLE_AUTH_ALLOWED_AUDIENCE (applies to preview and production)."
+  default     = "https://cloudflare-mfe-module-registry-service.suncoast.systems/"
+
+  validation {
+    condition     = trimspace(var.google_auth_allowed_audience) == "" || length(regexall(",", trimspace(var.google_auth_allowed_audience))) == 0
+    error_message = "google_auth_allowed_audience must contain only one audience value (no commas)."
+  }
+}
+
 variable "google_auth_allowed_audiences" {
   type        = string
-  description = "GOOGLE_AUTH_ALLOWED_AUDIENCES binding value."
+  description = "Legacy CSV value for GOOGLE_AUTH_ALLOWED_AUDIENCES (used when google_auth_allowed_audience is empty)."
   default     = ""
 }
 
@@ -240,37 +251,6 @@ variable "google_auth_allowed_domains" {
   type        = string
   description = "GOOGLE_AUTH_ALLOWED_DOMAINS binding value."
   default     = ""
-}
-
-variable "google_auth_allowed_groups" {
-  type        = string
-  description = "GOOGLE_AUTH_ALLOWED_GROUPS binding value."
-  default     = "mfe-registry-access@suncoast.systems"
-}
-
-variable "google_auth_groups_service_account_email" {
-  type        = string
-  description = "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_EMAIL binding value."
-  default     = ""
-}
-
-variable "google_auth_groups_service_account_private_key" {
-  type        = string
-  description = "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_PRIVATE_KEY binding value."
-  sensitive   = true
-  default     = ""
-}
-
-variable "google_auth_groups_impersonated_user" {
-  type        = string
-  description = "GOOGLE_AUTH_GROUPS_IMPERSONATED_USER binding value."
-  default     = ""
-}
-
-variable "google_auth_groups_cache_ttl_seconds" {
-  type        = number
-  description = "GOOGLE_AUTH_GROUPS_CACHE_TTL_SECONDS binding value."
-  default     = 300
 }
 
 variable "publish_uploads_enabled" {
@@ -307,4 +287,40 @@ variable "publish_uploads_max_manifest_bytes" {
   type        = number
   description = "PUBLISH_UPLOADS_MAX_MANIFEST_BYTES binding value."
   default     = 5242880
+}
+
+variable "publish_validation_strict" {
+  type        = string
+  description = "PUBLISH_VALIDATION_STRICT binding value."
+  default     = "true"
+}
+
+variable "publish_validation_require_props_schema" {
+  type        = string
+  description = "PUBLISH_VALIDATION_REQUIRE_PROPS_SCHEMA binding value."
+  default     = "true"
+}
+
+variable "publish_validation_require_default_props" {
+  type        = string
+  description = "PUBLISH_VALIDATION_REQUIRE_DEFAULT_PROPS binding value."
+  default     = "true"
+}
+
+variable "publish_validation_verify_asset_urls" {
+  type        = string
+  description = "PUBLISH_VALIDATION_VERIFY_ASSET_URLS binding value."
+  default     = "false"
+}
+
+variable "publish_validation_validate_manifest" {
+  type        = string
+  description = "PUBLISH_VALIDATION_VALIDATE_MANIFEST binding value."
+  default     = "true"
+}
+
+variable "publish_validation_timeout_ms" {
+  type        = number
+  description = "PUBLISH_VALIDATION_TIMEOUT_MS binding value."
+  default     = 8000
 }

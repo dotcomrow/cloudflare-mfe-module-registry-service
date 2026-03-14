@@ -61,6 +61,74 @@ interface ModuleVersionRow {
   updated_at: string;
 }
 
+export interface PublishValidationOptions {
+  strictMode?: boolean;
+  requirePropsSchema?: boolean;
+  requireDefaultProps?: boolean;
+  verifyAssetUrls?: boolean;
+  validateManifestDocument?: boolean;
+  remoteFetchTimeoutMs?: number;
+}
+
+interface ResolvedPublishValidationOptions {
+  strictMode: boolean;
+  requirePropsSchema: boolean;
+  requireDefaultProps: boolean;
+  verifyAssetUrls: boolean;
+  validateManifestDocument: boolean;
+  remoteFetchTimeoutMs: number;
+}
+
+interface JsonFetchOptions {
+  fieldName: string;
+  required: boolean;
+  timeoutMs: number;
+}
+
+const DEFAULT_VALIDATION_TIMEOUT_MS = 8000;
+const MIN_VALIDATION_TIMEOUT_MS = 1000;
+const MAX_VALIDATION_TIMEOUT_MS = 30000;
+
+function clampTimeoutMs(rawValue: number | undefined): number {
+  if (!Number.isFinite(rawValue)) {
+    return DEFAULT_VALIDATION_TIMEOUT_MS;
+  }
+  const normalized = Math.round(rawValue as number);
+  return Math.max(MIN_VALIDATION_TIMEOUT_MS, Math.min(MAX_VALIDATION_TIMEOUT_MS, normalized));
+}
+
+function resolvePublishValidationOptions(options?: PublishValidationOptions): ResolvedPublishValidationOptions {
+  const strictMode = options?.strictMode ?? true;
+  return {
+    strictMode,
+    requirePropsSchema: options?.requirePropsSchema ?? strictMode,
+    requireDefaultProps: options?.requireDefaultProps ?? strictMode,
+    verifyAssetUrls: options?.verifyAssetUrls ?? false,
+    validateManifestDocument: options?.validateManifestDocument ?? strictMode,
+    remoteFetchTimeoutMs: clampTimeoutMs(options?.remoteFetchTimeoutMs),
+  };
+}
+
+function formatErrorCause(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return String(error);
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("publish_validation_timeout"), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function parseChannel(input: unknown): PublishChannel {
   const normalized = typeof input === "string" ? input.trim().toLowerCase() : "";
   if (normalized === "preview" || normalized === "prod") {
@@ -146,23 +214,38 @@ export function validatePublishPayload(raw: unknown): PublishPayload {
   };
 }
 
-async function fetchJsonDocument(url: string | null, fallback: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function fetchJsonDocument(
+  url: string | null,
+  fallback: Record<string, unknown>,
+  options: JsonFetchOptions,
+): Promise<Record<string, unknown>> {
   if (!url) {
+    if (options.required) {
+      throw new HttpError(400, `Publish validation failed: ${options.fieldName} document URL is required.`);
+    }
     return fallback;
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("json_fetch_timeout"), 8000);
   try {
-    const response = await fetch(url, {
-      method: "GET",
-      signal: controller.signal,
-      headers: {
-        accept: "application/json",
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+        },
       },
-    });
+      options.timeoutMs,
+    );
 
     if (!response.ok) {
+      if (options.required) {
+        throw new HttpError(400, `Publish validation failed: unable to fetch ${options.fieldName} document.`, {
+          url,
+          status: response.status,
+          status_text: response.statusText,
+        });
+      }
       return fallback;
     }
 
@@ -171,12 +254,256 @@ async function fetchJsonDocument(url: string | null, fallback: Record<string, un
       return payload;
     }
 
+    if (options.required) {
+      throw new HttpError(400, `Publish validation failed: ${options.fieldName} document must be a JSON object.`, {
+        url,
+      });
+    }
+
     return fallback;
-  } catch {
+  } catch (error) {
+    if (options.required) {
+      if (error instanceof HttpError) {
+        throw error;
+      }
+      throw new HttpError(400, `Publish validation failed: unable to fetch ${options.fieldName} document.`, {
+        url,
+        cause: formatErrorCause(error),
+      });
+    }
     return fallback;
-  } finally {
-    clearTimeout(timeout);
   }
+}
+
+function pickFirstRecord(...values: unknown[]): Record<string, unknown> | null {
+  for (const value of values) {
+    if (isRecord(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function hasAnyKeys(record: Record<string, unknown>): boolean {
+  return Object.keys(record).length > 0;
+}
+
+function collectNonEmptyStrings(...values: unknown[]): string[] {
+  return uniqueArray(
+    values
+      .map((value) => asNonEmptyString(value))
+      .filter((value): value is string => typeof value === "string"),
+  );
+}
+
+function resolvePropsSchemaCandidate(
+  definition: Record<string, unknown>,
+  seed: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const definitionIo = isRecord(definition.io) ? definition.io : {};
+  const seedIo = isRecord(seed.io) ? seed.io : {};
+
+  return pickFirstRecord(
+    definition.props_schema,
+    definition.propsSchema,
+    definition.schema,
+    definition.config_schema,
+    definition.configSchema,
+    definitionIo.props_schema,
+    definitionIo.propsSchema,
+    definitionIo.schema,
+    definitionIo.config_schema,
+    definitionIo.configSchema,
+    seed.props_schema,
+    seed.propsSchema,
+    seed.schema,
+    seed.config_schema,
+    seed.configSchema,
+    seedIo.props_schema,
+    seedIo.propsSchema,
+    seedIo.schema,
+    seedIo.config_schema,
+    seedIo.configSchema,
+  );
+}
+
+function resolveDefaultPropsCandidate(
+  definition: Record<string, unknown>,
+  seed: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const definitionIo = isRecord(definition.io) ? definition.io : {};
+  const seedIo = isRecord(seed.io) ? seed.io : {};
+
+  return pickFirstRecord(
+    seed.default_props,
+    seed.defaultProps,
+    seed.defaults,
+    seed.props_defaults,
+    seedIo.default_props,
+    seedIo.defaultProps,
+    seedIo.defaults,
+    seedIo.props_defaults,
+    definition.default_props,
+    definition.defaultProps,
+    definition.defaults,
+    definition.props_defaults,
+    definitionIo.default_props,
+    definitionIo.defaultProps,
+    definitionIo.defaults,
+    definitionIo.props_defaults,
+  );
+}
+
+function validateModuleMetadataForPublish(
+  payload: PublishPayload,
+  definition: Record<string, unknown>,
+  seed: Record<string, unknown>,
+  options: ResolvedPublishValidationOptions,
+): void {
+  if (options.strictMode) {
+    if (!hasAnyKeys(definition)) {
+      throw new HttpError(400, "Publish validation failed: definition metadata is empty.");
+    }
+    if (!hasAnyKeys(seed)) {
+      throw new HttpError(400, "Publish validation failed: seed metadata is empty.");
+    }
+  }
+
+  if (options.requirePropsSchema && !resolvePropsSchemaCandidate(definition, seed)) {
+    throw new HttpError(
+      400,
+      "Publish validation failed: props_schema is required in definition/seed metadata for Directus rendering.",
+    );
+  }
+
+  if (options.requireDefaultProps && !resolveDefaultPropsCandidate(definition, seed)) {
+    throw new HttpError(
+      400,
+      "Publish validation failed: default_props is required in definition/seed metadata for Directus rendering.",
+    );
+  }
+
+  const definitionIo = isRecord(definition.io) ? definition.io : {};
+  const seedIo = isRecord(seed.io) ? seed.io : {};
+  const declaredModuleKeys = collectNonEmptyStrings(
+    definition.module_key,
+    definitionIo.module_key,
+    seed.module_key,
+    seedIo.module_key,
+  );
+  const mismatchedModuleKey = declaredModuleKeys.find((item) => item !== payload.module_key);
+  if (mismatchedModuleKey) {
+    throw new HttpError(400, "Publish validation failed: module_key mismatch between payload and module metadata.", {
+      payload_module_key: payload.module_key,
+      metadata_module_keys: declaredModuleKeys,
+    });
+  }
+
+  const payloadProvider = asNonEmptyString(payload.provider);
+  if (payloadProvider) {
+    const declaredProviders = collectNonEmptyStrings(
+      definition.provider,
+      definitionIo.provider,
+      seed.provider,
+      seedIo.provider,
+    );
+    const mismatchedProvider = declaredProviders.find(
+      (provider) => provider.toLowerCase() !== payloadProvider.toLowerCase(),
+    );
+    if (mismatchedProvider) {
+      throw new HttpError(400, "Publish validation failed: provider mismatch between payload and module metadata.", {
+        payload_provider: payloadProvider,
+        metadata_providers: declaredProviders,
+      });
+    }
+  }
+}
+
+function validateManifestCompatibility(payload: PublishPayload, manifest: Record<string, unknown>): void {
+  const manifestModuleKey = asNonEmptyString(manifest.module_key);
+  if (manifestModuleKey && manifestModuleKey !== payload.module_key) {
+    throw new HttpError(400, "Publish validation failed: manifest module_key does not match publish payload.", {
+      manifest_module_key: manifestModuleKey,
+      payload_module_key: payload.module_key,
+    });
+  }
+
+  const manifestModuleVersion = asNonEmptyString(manifest.module_version);
+  if (manifestModuleVersion && manifestModuleVersion !== payload.module_version) {
+    throw new HttpError(
+      400,
+      "Publish validation failed: manifest module_version does not match publish payload.",
+      {
+        manifest_module_version: manifestModuleVersion,
+        payload_module_version: payload.module_version,
+      },
+    );
+  }
+
+  const manifestChannel = asNonEmptyString(manifest.channel);
+  if (manifestChannel && manifestChannel.toLowerCase() !== payload.channel) {
+    throw new HttpError(400, "Publish validation failed: manifest channel does not match publish payload.", {
+      manifest_channel: manifestChannel,
+      payload_channel: payload.channel,
+    });
+  }
+
+  const manifestBundleUrl = asNonEmptyString(manifest.bundle_url);
+  if (manifestBundleUrl && manifestBundleUrl !== payload.bundle_url) {
+    throw new HttpError(400, "Publish validation failed: manifest bundle_url does not match publish payload.", {
+      manifest_bundle_url: manifestBundleUrl,
+      payload_bundle_url: payload.bundle_url,
+    });
+  }
+}
+
+async function verifyHttpResourceReachable(url: string, fieldName: string, timeoutMs: number): Promise<void> {
+  let headResponse: Response;
+  try {
+    headResponse = await fetchWithTimeout(url, { method: "HEAD", redirect: "follow" }, timeoutMs);
+  } catch (error) {
+    throw new HttpError(400, `Publish validation failed: unable to verify ${fieldName} URL reachability.`, {
+      field: fieldName,
+      url,
+      cause: formatErrorCause(error),
+    });
+  }
+
+  if (headResponse.ok) {
+    return;
+  }
+
+  if (headResponse.status === 405 || headResponse.status === 501) {
+    let getResponse: Response;
+    try {
+      getResponse = await fetchWithTimeout(url, { method: "GET", redirect: "follow" }, timeoutMs);
+    } catch (error) {
+      throw new HttpError(400, `Publish validation failed: unable to verify ${fieldName} URL reachability.`, {
+        field: fieldName,
+        url,
+        cause: formatErrorCause(error),
+      });
+    }
+
+    if (getResponse.ok) {
+      getResponse.body?.cancel();
+      return;
+    }
+
+    throw new HttpError(400, `Publish validation failed: ${fieldName} URL is not reachable.`, {
+      field: fieldName,
+      url,
+      status: getResponse.status,
+      status_text: getResponse.statusText,
+    });
+  }
+
+  throw new HttpError(400, `Publish validation failed: ${fieldName} URL is not reachable.`, {
+    field: fieldName,
+    url,
+    status: headResponse.status,
+    status_text: headResponse.statusText,
+  });
 }
 
 function uniqueArray<T>(values: T[]): T[] {
@@ -544,9 +871,11 @@ export async function publishModuleVersion(
   principal: AuthPrincipal,
   requestBodyText: string,
   idempotencyKeyHeader: string | null,
+  validationOptions?: PublishValidationOptions,
 ): Promise<Record<string, unknown>> {
   await ensureRegistrySchema(db);
 
+  const validation = resolvePublishValidationOptions(validationOptions);
   const now = nowIso();
   const publishedAt = payload.published_at ?? now;
   const definitionRef = payload.definition ?? {};
@@ -554,8 +883,34 @@ export async function publishModuleVersion(
 
   const definitionUrl = maybeString(definitionRef.url);
   const seedUrl = maybeString(seedRef.url);
-  const definitionDoc = await fetchJsonDocument(definitionUrl, definitionRef);
-  const seedDoc = await fetchJsonDocument(seedUrl, seedRef);
+  const definitionDoc = await fetchJsonDocument(definitionUrl, definitionRef, {
+    fieldName: "definition",
+    required: validation.strictMode && definitionUrl !== null,
+    timeoutMs: validation.remoteFetchTimeoutMs,
+  });
+  const seedDoc = await fetchJsonDocument(seedUrl, seedRef, {
+    fieldName: "seed",
+    required: validation.strictMode && seedUrl !== null,
+    timeoutMs: validation.remoteFetchTimeoutMs,
+  });
+
+  validateModuleMetadataForPublish(payload, definitionDoc, seedDoc, validation);
+
+  if (validation.validateManifestDocument) {
+    const manifestDoc = await fetchJsonDocument(payload.manifest_url, {}, {
+      fieldName: "manifest",
+      required: true,
+      timeoutMs: validation.remoteFetchTimeoutMs,
+    });
+    validateManifestCompatibility(payload, manifestDoc);
+  }
+
+  if (validation.verifyAssetUrls) {
+    await verifyHttpResourceReachable(payload.bundle_url, "bundle_url", validation.remoteFetchTimeoutMs);
+    if (!validation.validateManifestDocument) {
+      await verifyHttpResourceReachable(payload.manifest_url, "manifest_url", validation.remoteFetchTimeoutMs);
+    }
+  }
 
   const integrations = extractIntegrations(definitionDoc, seedDoc);
   const parameters = extractParameters(definitionDoc, seedDoc);

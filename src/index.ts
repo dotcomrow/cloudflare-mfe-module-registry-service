@@ -72,6 +72,17 @@ function parseByteLimit(raw: string | undefined, fallback: number): number {
   return parsed;
 }
 
+function parseBoundedInteger(raw: string | undefined, fallback: number, min: number, max: number): number {
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return fallback;
+  }
+  const parsed = Number.parseInt(raw.trim(), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, parsed));
+}
+
 function sanitizePathSegment(value: string, fallback: string): string {
   const normalized = value
     .trim()
@@ -507,8 +518,24 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
     const principal = await requireGooglePublishAuth(request, env);
     const { payload, requestBodyText } = await parsePublishRequest(request, env);
     const idempotencyKey = request.headers.get("x-idempotency-key");
+    const strictValidation = toBooleanFlag(env.PUBLISH_VALIDATION_STRICT, true);
+    const validationOptions = {
+      strictMode: strictValidation,
+      requirePropsSchema: toBooleanFlag(env.PUBLISH_VALIDATION_REQUIRE_PROPS_SCHEMA, strictValidation),
+      requireDefaultProps: toBooleanFlag(env.PUBLISH_VALIDATION_REQUIRE_DEFAULT_PROPS, strictValidation),
+      verifyAssetUrls: toBooleanFlag(env.PUBLISH_VALIDATION_VERIFY_ASSET_URLS, false),
+      validateManifestDocument: toBooleanFlag(env.PUBLISH_VALIDATION_VALIDATE_MANIFEST, strictValidation),
+      remoteFetchTimeoutMs: parseBoundedInteger(env.PUBLISH_VALIDATION_TIMEOUT_MS, 8000, 1000, 30000),
+    };
 
-    const result = await publishModuleVersion(env.REGISTRY_DB, payload, principal, requestBodyText, idempotencyKey);
+    const result = await publishModuleVersion(
+      env.REGISTRY_DB,
+      payload,
+      principal,
+      requestBodyText,
+      idempotencyKey,
+      validationOptions,
+    );
     return jsonResponse(result, 200, API_HEADERS);
   }
 

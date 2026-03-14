@@ -22,6 +22,7 @@ jobs:
       TF_API_TOKEN: ${{ secrets.TFE_TOKEN }}
       TFC_WORKSPACE_PRODUCTION: ${{ vars.TFC_WORKSPACE_PRODUCTION }}
       TFC_WORKSPACE_PREVIEW: ${{ vars.TFC_WORKSPACE_PREVIEW }}
+      SHARED_GOOGLE_AUTH_AUDIENCE: ${{ vars.MODULE_REGISTRY_SERVICE_GOOGLE_TOKEN_AUDIENCE || vars.GOOGLE_AUTH_ALLOWED_AUDIENCE || 'https://cloudflare-mfe-module-registry-service.suncoast.systems/' }}
       TF_REGISTRY_CLIENT_TIMEOUT: "120"
       TF_REGISTRY_DISCOVERY_RETRY: "8"
 
@@ -99,6 +100,7 @@ jobs:
           TF_VAR_deployment_environment: '"${{ steps.target.outputs.deployment_environment }}"'
           TF_VAR_manage_d1_resources: ${{ steps.target.outputs.manage_d1_resources }}
           TF_VAR_manage_r2_resources: ${{ steps.target.outputs.manage_r2_resources }}
+          TF_VAR_google_auth_allowed_audience: '"${{ env.SHARED_GOOGLE_AUTH_AUDIENCE }}"'
         with:
           workspace: ${{ steps.target.outputs.workspace }}
           configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
