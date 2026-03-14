@@ -308,3 +308,39 @@ variable "publish_uploads_max_manifest_bytes" {
   description = "PUBLISH_UPLOADS_MAX_MANIFEST_BYTES binding value."
   default     = 5242880
 }
+
+variable "publish_validation_strict" {
+  type        = string
+  description = "PUBLISH_VALIDATION_STRICT binding value."
+  default     = "true"
+}
+
+variable "publish_validation_require_props_schema" {
+  type        = string
+  description = "PUBLISH_VALIDATION_REQUIRE_PROPS_SCHEMA binding value."
+  default     = "true"
+}
+
+variable "publish_validation_require_default_props" {
+  type        = string
+  description = "PUBLISH_VALIDATION_REQUIRE_DEFAULT_PROPS binding value."
+  default     = "true"
+}
+
+variable "publish_validation_verify_asset_urls" {
+  type        = string
+  description = "PUBLISH_VALIDATION_VERIFY_ASSET_URLS binding value."
+  default     = "false"
+}
+
+variable "publish_validation_validate_manifest" {
+  type        = string
+  description = "PUBLISH_VALIDATION_VALIDATE_MANIFEST binding value."
+  default     = "true"
+}
+
+variable "publish_validation_timeout_ms" {
+  type        = number
+  description = "PUBLISH_VALIDATION_TIMEOUT_MS binding value."
+  default     = 8000
+}

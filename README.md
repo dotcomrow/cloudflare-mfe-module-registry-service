@@ -9,6 +9,7 @@ Cloudflare Worker + D1 service for MFE catalog management.
 - Authenticated publish API (`POST /v1/modules/publish`) for CI publishers.
 - Idempotent publish handling (`x-idempotency-key`) to make retries safe.
 - Storage of module metadata, versions, integration info, parameter info, and optional screenshots metadata.
+- Strict, configurable publish validation to block incomplete module metadata.
 
 ## API Endpoints
 
@@ -17,6 +18,11 @@ Cloudflare Worker + D1 service for MFE catalog management.
 - `GET /api/modules/:module_key`
 - `GET /api/modules/:module_key/:module_version?channel=preview|prod`
 - `POST /v1/modules/publish` (Google-auth protected, supports JSON metadata or multipart file upload)
+
+Directus integration uses:
+
+- `GET /api/modules` to populate module choices in the editor.
+- `GET /api/modules/:module_key` to resolve module definition/seed metadata for props rendering.
 
 `POST /v1/modules/publish` accepts the payload emitted by `example-mfe/scripts/notify-catalog-service.mjs`:
 
@@ -99,6 +105,19 @@ If both `GOOGLE_AUTH_ALLOWED_EMAILS` and `GOOGLE_AUTH_ALLOWED_DOMAINS` are empty
 
 When `GOOGLE_AUTH_ALLOWED_GROUPS` is set, publish access additionally requires membership in at least one configured Google Group.
 
+## Publish Validation Gates
+
+Publish API validation defaults to strict mode and can be tuned with env vars:
+
+- `PUBLISH_VALIDATION_STRICT` (`true` default)
+- `PUBLISH_VALIDATION_REQUIRE_PROPS_SCHEMA` (defaults to strict mode value)
+- `PUBLISH_VALIDATION_REQUIRE_DEFAULT_PROPS` (defaults to strict mode value)
+- `PUBLISH_VALIDATION_VALIDATE_MANIFEST` (defaults to strict mode value)
+- `PUBLISH_VALIDATION_VERIFY_ASSET_URLS` (`false` default; when enabled verifies remote `bundle_url` and `manifest_url` reachability)
+- `PUBLISH_VALIDATION_TIMEOUT_MS` (`8000` default; clamped to `1000..30000`)
+
+When strict validation is enabled, publish requires complete definition/seed metadata suitable for Directus rendering and rejects mismatches (for example payload `module_key` vs metadata `module_key`).
+
 ## Google Group Setup (Workspace)
 
 To enforce group membership, configure Google Workspace:
@@ -173,6 +192,10 @@ Optional Terraform variables:
 - `publish_uploads_public_base_url_preview`, `publish_uploads_public_base_url_production` (optional URL overrides)
 - `publish_uploads_r2_prefix`
 - `publish_uploads_max_bundle_bytes`, `publish_uploads_max_manifest_bytes`
+- `publish_validation_strict`
+- `publish_validation_require_props_schema`, `publish_validation_require_default_props`
+- `publish_validation_validate_manifest`, `publish_validation_verify_asset_urls`
+- `publish_validation_timeout_ms`
 
 If base URL overrides are not provided, uploads automatically use `<worker-origin>/assets/...`.
 

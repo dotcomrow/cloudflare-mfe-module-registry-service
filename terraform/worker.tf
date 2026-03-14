@@ -126,6 +126,36 @@ resource "cloudflare_worker_version" "app" {
       text = tostring(var.publish_uploads_max_manifest_bytes)
     },
     {
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_STRICT"
+      text = var.publish_validation_strict
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_REQUIRE_PROPS_SCHEMA"
+      text = var.publish_validation_require_props_schema
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_REQUIRE_DEFAULT_PROPS"
+      text = var.publish_validation_require_default_props
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_VERIFY_ASSET_URLS"
+      text = var.publish_validation_verify_asset_urls
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_VALIDATE_MANIFEST"
+      text = var.publish_validation_validate_manifest
+    },
+    {
+      type = "plain_text"
+      name = "PUBLISH_VALIDATION_TIMEOUT_MS"
+      text = tostring(var.publish_validation_timeout_ms)
+    },
+    {
       type = "secret_text"
       name = "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_PRIVATE_KEY"
       text = var.google_auth_groups_service_account_private_key
