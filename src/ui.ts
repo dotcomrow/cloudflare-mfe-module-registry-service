@@ -156,6 +156,8 @@ export function renderIndexHtml(serviceTitle: string): string {
       max-height: none;
       overflow-y: auto;
       overflow-x: hidden;
+      align-content: start;
+      grid-auto-rows: max-content;
     }
 
     .module-item {
