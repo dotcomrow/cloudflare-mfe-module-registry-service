@@ -31,25 +31,21 @@ export function renderIndexHtml(serviceTitle: string): string {
     }
 
     * { box-sizing: border-box; }
-    html, body { height: 100%; }
 
     body {
       margin: 0;
       font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: var(--text);
       background: linear-gradient(180deg, #f8fafc 0%, #eff6ff 100%);
-      height: 100%;
-      overflow: hidden;
+      min-height: 100vh;
     }
 
     .shell {
       max-width: 1320px;
       margin: 0 auto;
-      padding: 18px;
-      height: 100%;
+      padding: 24px;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
-      gap: 14px;
+      gap: 16px;
     }
 
     .toolbar {
@@ -78,7 +74,7 @@ export function renderIndexHtml(serviceTitle: string): string {
 
     input[type="search"],
     select,
-    .toolbar button {
+    button {
       border: 1px solid var(--border);
       background: #fff;
       color: var(--text);
@@ -89,7 +85,7 @@ export function renderIndexHtml(serviceTitle: string): string {
 
     input[type="search"] { width: 100%; }
 
-    .toolbar button {
+    button {
       cursor: pointer;
       font-weight: 600;
       background: var(--panel-soft);
@@ -99,7 +95,6 @@ export function renderIndexHtml(serviceTitle: string): string {
       font-size: 0.85rem;
       color: var(--muted);
       min-height: 1.1rem;
-      grid-column: 1 / -1;
     }
 
     .status.error { color: var(--danger); }
@@ -108,7 +103,7 @@ export function renderIndexHtml(serviceTitle: string): string {
       display: grid;
       grid-template-columns: minmax(320px, 420px) 1fr;
       gap: 16px;
-      min-height: 0;
+      min-height: 70vh;
     }
 
     .panel {
@@ -119,7 +114,7 @@ export function renderIndexHtml(serviceTitle: string): string {
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      min-height: 0;
+      min-height: 300px;
     }
 
     .panel-header {
@@ -132,16 +127,16 @@ export function renderIndexHtml(serviceTitle: string): string {
 
     .list-scroll,
     .detail-scroll {
-      flex: 1 1 auto;
-      min-height: 0;
-      overflow-y: auto;
-      overflow-x: hidden;
+      overflow: auto;
+      max-height: calc(100vh - 240px);
       padding: 10px;
       display: grid;
       gap: 10px;
-      overscroll-behavior: contain;
-      scrollbar-gutter: stable both-edges;
-      -webkit-overflow-scrolling: touch;
+    }
+
+    .detail-scroll {
+      overflow-y: scroll;
+      scrollbar-gutter: stable;
     }
 
     .module-item {
@@ -153,9 +148,6 @@ export function renderIndexHtml(serviceTitle: string): string {
       gap: 8px;
       cursor: pointer;
       transition: border-color 140ms ease, transform 140ms ease;
-      text-align: left;
-      font: inherit;
-      font-size: 0.92rem;
     }
 
     .module-item:hover {
@@ -183,10 +175,15 @@ export function renderIndexHtml(serviceTitle: string): string {
       display: inline-flex;
       align-items: center;
       border-radius: 999px;
-      padding: 0.12rem 0.45rem;
-      font-size: 0.68rem;
+      padding: 0.2rem 0.55rem;
+      font-size: 0.75rem;
       border: 1px solid var(--border);
       background: #f8fafc;
+    }
+
+    .list-scroll .chip {
+      padding: 0.12rem 0.45rem;
+      font-size: 0.66rem;
       line-height: 1.2;
     }
 
@@ -246,41 +243,10 @@ export function renderIndexHtml(serviceTitle: string): string {
       color: #e2e8f0;
       border-radius: 8px;
       padding: 10px;
-      overflow-x: auto;
-      overflow-y: visible;
-      max-height: none;
+      overflow: auto;
+      max-height: 280px;
       font-size: 12px;
       line-height: 1.45;
-      scrollbar-gutter: stable both-edges;
-    }
-
-    .list-scroll,
-    .detail-scroll,
-    pre {
-      scrollbar-width: auto;
-      scrollbar-color: #94a3b8 #e2e8f0;
-    }
-
-    .list-scroll::-webkit-scrollbar,
-    .detail-scroll::-webkit-scrollbar,
-    pre::-webkit-scrollbar {
-      width: 12px;
-      height: 12px;
-    }
-
-    .list-scroll::-webkit-scrollbar-thumb,
-    .detail-scroll::-webkit-scrollbar-thumb,
-    pre::-webkit-scrollbar-thumb {
-      background: #94a3b8;
-      border-radius: 999px;
-      border: 2px solid #e2e8f0;
-    }
-
-    .list-scroll::-webkit-scrollbar-track,
-    .detail-scroll::-webkit-scrollbar-track,
-    pre::-webkit-scrollbar-track {
-      background: #e2e8f0;
-      border-radius: 999px;
     }
 
     .versions {
@@ -327,19 +293,9 @@ export function renderIndexHtml(serviceTitle: string): string {
     }
 
     @media (max-width: 980px) {
-      body {
-        height: auto;
-        min-height: 100vh;
-        overflow: auto;
-      }
-      .shell {
-        height: auto;
-        min-height: 100vh;
-        padding: 14px;
-      }
       .toolbar { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
-      .panel { min-height: 360px; }
+      .list-scroll, .detail-scroll { max-height: none; }
       .kv { grid-template-columns: 1fr; }
     }
   </style>
