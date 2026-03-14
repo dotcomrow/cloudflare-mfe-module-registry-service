@@ -44,11 +44,13 @@ jobs:
             echo "workspace=${PROD_WORKSPACE}" >> "$GITHUB_OUTPUT"
             echo "deployment_environment=production" >> "$GITHUB_OUTPUT"
             echo "manage_d1_resources=true" >> "$GITHUB_OUTPUT"
+            echo "manage_r2_resources=true" >> "$GITHUB_OUTPUT"
             echo "wrangler_env=production" >> "$GITHUB_OUTPUT"
           elif [ "${GITHUB_REF_NAME}" = "dev" ]; then
             echo "workspace=${PREVIEW_WORKSPACE}" >> "$GITHUB_OUTPUT"
             echo "deployment_environment=preview" >> "$GITHUB_OUTPUT"
             echo "manage_d1_resources=false" >> "$GITHUB_OUTPUT"
+            echo "manage_r2_resources=true" >> "$GITHUB_OUTPUT"
             echo "wrangler_env=preview" >> "$GITHUB_OUTPUT"
           else
             echo "Unsupported branch for deployment: ${GITHUB_REF_NAME}" >&2
@@ -96,6 +98,7 @@ jobs:
         env:
           TF_VAR_deployment_environment: '"${{ steps.target.outputs.deployment_environment }}"'
           TF_VAR_manage_d1_resources: ${{ steps.target.outputs.manage_d1_resources }}
+          TF_VAR_manage_r2_resources: ${{ steps.target.outputs.manage_r2_resources }}
         with:
           workspace: ${{ steps.target.outputs.workspace }}
           configuration_version: ${{ steps.upload.outputs.configuration_version_id }}

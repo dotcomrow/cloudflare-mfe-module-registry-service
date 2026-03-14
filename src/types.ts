@@ -2,6 +2,7 @@ export type PublishChannel = "preview" | "prod";
 
 export interface Env {
   REGISTRY_DB: D1Database;
+  REGISTRY_ASSETS: R2Bucket;
   ENVIRONMENT?: string;
   SERVICE_TITLE?: string;
   GOOGLE_AUTH_ENABLED?: string;
@@ -13,6 +14,11 @@ export interface Env {
   GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
   GOOGLE_AUTH_GROUPS_IMPERSONATED_USER?: string;
   GOOGLE_AUTH_GROUPS_CACHE_TTL_SECONDS?: string;
+  PUBLISH_UPLOADS_ENABLED?: string;
+  PUBLISH_UPLOADS_PUBLIC_BASE_URL?: string;
+  PUBLISH_UPLOADS_R2_PREFIX?: string;
+  PUBLISH_UPLOADS_MAX_BUNDLE_BYTES?: string;
+  PUBLISH_UPLOADS_MAX_MANIFEST_BYTES?: string;
 }
 
 export interface PublishPayload {
