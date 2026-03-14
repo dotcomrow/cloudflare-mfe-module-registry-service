@@ -67,8 +67,13 @@ resource "cloudflare_worker_version" "app" {
     },
     {
       type = "plain_text"
+      name = "GOOGLE_AUTH_ALLOWED_AUDIENCE"
+      text = var.google_auth_allowed_audience
+    },
+    {
+      type = "plain_text"
       name = "GOOGLE_AUTH_ALLOWED_AUDIENCES"
-      text = var.google_auth_allowed_audiences
+      text = local.google_auth_allowed_audiences_effective
     },
     {
       type = "plain_text"
@@ -166,6 +171,12 @@ resource "cloudflare_worker_version" "app" {
     precondition {
       condition     = fileexists(local.worker_entry_file)
       error_message = "Missing bundled Worker entrypoint at ${local.worker_entry_file}. Run wrangler deploy --dry-run to terraform/worker-build before Terraform apply."
+    }
+    precondition {
+      condition = trimspace(var.google_auth_allowed_audience) == "" || trimspace(var.google_auth_allowed_audiences) == "" || (
+        trimspace(var.google_auth_allowed_audience) == trimspace(var.google_auth_allowed_audiences)
+      )
+      error_message = "google_auth_allowed_audience and google_auth_allowed_audiences cannot conflict; use one shared audience value."
     }
     precondition {
       condition = trimspace(var.google_auth_allowed_groups) == "" || (

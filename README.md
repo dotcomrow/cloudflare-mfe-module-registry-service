@@ -92,7 +92,8 @@ Publish auth is enabled by default.
 Set these in Wrangler env vars:
 
 - `GOOGLE_AUTH_ENABLED` (`true` by default)
-- `GOOGLE_AUTH_ALLOWED_AUDIENCES` (comma-separated Google client IDs)
+- `GOOGLE_AUTH_ALLOWED_AUDIENCE` (preferred single audience value; use same value in preview and production)
+- `GOOGLE_AUTH_ALLOWED_AUDIENCES` (legacy CSV fallback; used only when `GOOGLE_AUTH_ALLOWED_AUDIENCE` is empty)
 - `GOOGLE_AUTH_ALLOWED_EMAILS` (optional comma-separated allow-list)
 - `GOOGLE_AUTH_ALLOWED_DOMAINS` (optional comma-separated email domains)
 - `GOOGLE_AUTH_ALLOWED_GROUPS` (optional comma-separated Google Group emails)
@@ -167,6 +168,9 @@ GitHub configuration:
 
 - Repository secret: `TFE_TOKEN`
 - Repository variable: `TFE_PROJECT` (Terraform Cloud project name)
+- Optional shared audience variable (repo or org): `MODULE_REGISTRY_SERVICE_GOOGLE_TOKEN_AUDIENCE`
+  - Used by deployment workflows to set one `google_auth_allowed_audience` value for both preview and production.
+  - Default fallback (when unset): `https://cloudflare-mfe-module-registry-service.suncoast.systems/`
 
 Set these Terraform variables in each workspace (sensitive where noted):
 
@@ -182,7 +186,9 @@ Optional Terraform variables:
 - `manage_worker_domains`, `manage_worker_routes`
 - `manage_r2_resources`, `r2_dev_assets_bucket_name`, `r2_prod_assets_bucket_name`
 - `worker_production_route_pattern`, `worker_preview_route_pattern`
-- `google_auth_allowed_audiences`, `google_auth_allowed_emails`, `google_auth_allowed_domains`
+- `google_auth_allowed_audience` (preferred shared value for both preview/prod)
+- `google_auth_allowed_audiences` (legacy fallback CSV)
+- `google_auth_allowed_emails`, `google_auth_allowed_domains`
 - `google_auth_allowed_groups`
 - `google_auth_groups_service_account_email`
 - `google_auth_groups_service_account_private_key` (sensitive)

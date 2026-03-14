@@ -6,6 +6,7 @@ export interface Env {
   ENVIRONMENT?: string;
   SERVICE_TITLE?: string;
   GOOGLE_AUTH_ENABLED?: string;
+  GOOGLE_AUTH_ALLOWED_AUDIENCE?: string;
   GOOGLE_AUTH_ALLOWED_AUDIENCES?: string;
   GOOGLE_AUTH_ALLOWED_EMAILS?: string;
   GOOGLE_AUTH_ALLOWED_DOMAINS?: string;

@@ -224,9 +224,20 @@ variable "google_auth_enabled" {
   default     = "true"
 }
 
+variable "google_auth_allowed_audience" {
+  type        = string
+  description = "Single shared audience value for GOOGLE_AUTH_ALLOWED_AUDIENCE (applies to preview and production)."
+  default     = "https://cloudflare-mfe-module-registry-service.suncoast.systems/"
+
+  validation {
+    condition     = trimspace(var.google_auth_allowed_audience) == "" || length(regexall(",", trimspace(var.google_auth_allowed_audience))) == 0
+    error_message = "google_auth_allowed_audience must contain only one audience value (no commas)."
+  }
+}
+
 variable "google_auth_allowed_audiences" {
   type        = string
-  description = "GOOGLE_AUTH_ALLOWED_AUDIENCES binding value."
+  description = "Legacy CSV value for GOOGLE_AUTH_ALLOWED_AUDIENCES (used when google_auth_allowed_audience is empty)."
   default     = ""
 }
 

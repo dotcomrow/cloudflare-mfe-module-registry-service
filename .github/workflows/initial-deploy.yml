@@ -10,6 +10,7 @@ jobs:
     env:
       TF_CLOUD_ORGANIZATION: ${{ github.repository_owner }}
       TF_API_TOKEN: ${{ secrets.TFE_TOKEN }}
+      GOOGLE_AUTH_ALLOWED_AUDIENCE: ${{ vars.MODULE_REGISTRY_SERVICE_GOOGLE_TOKEN_AUDIENCE || vars.GOOGLE_AUTH_ALLOWED_AUDIENCE || 'https://cloudflare-mfe-module-registry-service.suncoast.systems/' }}
     name: Build and Deploy
     runs-on: ubuntu-latest
 
@@ -165,12 +166,17 @@ jobs:
 
           create_vars_for_workspace() {
             local workspace_id="$1"
+            local deployment_environment="$2"
             create_var "$workspace_id" "project_name" "${{ github.event.repository.name }}" "project name"
             create_var "$workspace_id" "org_name" "${{ github.repository_owner }}" "organization name"
+            create_var "$workspace_id" "deployment_environment" "$deployment_environment" "workspace deployment environment"
+            if [ -n "${GOOGLE_AUTH_ALLOWED_AUDIENCE}" ]; then
+              create_var "$workspace_id" "google_auth_allowed_audience" "${GOOGLE_AUTH_ALLOWED_AUDIENCE}" "single shared Google auth audience"
+            fi
           }
 
-          create_vars_for_workspace "${{ steps.create_workspaces.outputs.workspace_id_production }}"
-          create_vars_for_workspace "${{ steps.create_workspaces.outputs.workspace_id_preview }}"
+          create_vars_for_workspace "${{ steps.create_workspaces.outputs.workspace_id_production }}" "production"
+          create_vars_for_workspace "${{ steps.create_workspaces.outputs.workspace_id_preview }}" "preview"
 
       - uses: hashicorp/tfc-workflows-github/actions/upload-configuration@8e08d1ba957673f5fbf971a22b3219639dc45661
         id: upload

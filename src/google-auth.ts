@@ -101,8 +101,16 @@ function assertTokenFresh(tokenInfo: GoogleTokenInfo): void {
   }
 }
 
+function resolveAllowedAudiences(env: Env): string[] {
+  const singleAudience = (env.GOOGLE_AUTH_ALLOWED_AUDIENCE ?? "").trim();
+  if (singleAudience) {
+    return [singleAudience];
+  }
+  return parseCsv(env.GOOGLE_AUTH_ALLOWED_AUDIENCES);
+}
+
 function assertAudienceAllowed(tokenInfo: GoogleTokenInfo, env: Env): void {
-  const allowedAudiences = parseCsv(env.GOOGLE_AUTH_ALLOWED_AUDIENCES);
+  const allowedAudiences = resolveAllowedAudiences(env);
   if (allowedAudiences.length === 0) {
     return;
   }
