@@ -121,6 +121,7 @@ export function renderIndexHtml(serviceTitle: string): string {
     .modules-panel {
       position: sticky;
       top: 24px;
+      height: calc(100vh - 48px);
       max-height: calc(100vh - 48px);
     }
 
@@ -150,7 +151,9 @@ export function renderIndexHtml(serviceTitle: string): string {
     }
 
     .modules-panel .list-scroll {
-      max-height: calc(100vh - 130px);
+      flex: 1 1 auto;
+      min-height: 0;
+      max-height: none;
       overflow-y: auto;
       overflow-x: hidden;
     }
@@ -315,6 +318,7 @@ export function renderIndexHtml(serviceTitle: string): string {
       .modules-panel {
         position: static;
         top: auto;
+        height: auto;
         max-height: none;
       }
       .list-scroll, .detail-scroll { max-height: none; }
