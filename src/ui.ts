@@ -104,6 +104,7 @@ export function renderIndexHtml(serviceTitle: string): string {
       grid-template-columns: minmax(320px, 420px) 1fr;
       gap: 16px;
       min-height: 70vh;
+      align-items: start;
     }
 
     .panel {
@@ -115,6 +116,12 @@ export function renderIndexHtml(serviceTitle: string): string {
       display: flex;
       flex-direction: column;
       min-height: 300px;
+    }
+
+    .modules-panel {
+      position: sticky;
+      top: 24px;
+      max-height: calc(100vh - 48px);
     }
 
     .panel-header {
@@ -140,6 +147,12 @@ export function renderIndexHtml(serviceTitle: string): string {
       height: auto;
       scrollbar-gutter: auto;
       overscroll-behavior: auto;
+    }
+
+    .modules-panel .list-scroll {
+      max-height: calc(100vh - 130px);
+      overflow-y: auto;
+      overflow-x: hidden;
     }
 
     .module-item {
@@ -299,6 +312,11 @@ export function renderIndexHtml(serviceTitle: string): string {
     @media (max-width: 980px) {
       .toolbar { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
+      .modules-panel {
+        position: static;
+        top: auto;
+        max-height: none;
+      }
       .list-scroll, .detail-scroll { max-height: none; }
       .kv { grid-template-columns: 1fr; }
     }
@@ -324,7 +342,7 @@ export function renderIndexHtml(serviceTitle: string): string {
     </section>
 
     <section class="grid">
-      <article class="panel">
+      <article class="panel modules-panel">
         <div class="panel-header" id="moduleCount">Modules</div>
         <div id="moduleList" class="list-scroll"></div>
       </article>
