@@ -31,20 +31,21 @@ export function renderIndexHtml(serviceTitle: string): string {
     }
 
     * { box-sizing: border-box; }
+    html, body { height: 100%; }
 
     body {
       margin: 0;
       font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: var(--text);
       background: linear-gradient(180deg, #f8fafc 0%, #eff6ff 100%);
-      height: 100dvh;
+      height: 100%;
       overflow: hidden;
     }
 
     .shell {
-      max-width: 1440px;
+      max-width: 1320px;
       margin: 0 auto;
-      padding: 20px;
+      padding: 18px;
       height: 100%;
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
@@ -77,18 +78,18 @@ export function renderIndexHtml(serviceTitle: string): string {
 
     input[type="search"],
     select,
-    button {
+    .toolbar button {
       border: 1px solid var(--border);
       background: #fff;
       color: var(--text);
       border-radius: 10px;
-      padding: 0.7rem 0.9rem;
-      font-size: 1rem;
+      padding: 0.6rem 0.8rem;
+      font-size: 0.95rem;
     }
 
     input[type="search"] { width: 100%; }
 
-    button {
+    .toolbar button {
       cursor: pointer;
       font-weight: 600;
       background: var(--panel-soft);
@@ -98,13 +99,14 @@ export function renderIndexHtml(serviceTitle: string): string {
       font-size: 0.85rem;
       color: var(--muted);
       min-height: 1.1rem;
+      grid-column: 1 / -1;
     }
 
     .status.error { color: var(--danger); }
 
     .grid {
       display: grid;
-      grid-template-columns: minmax(360px, 500px) 1fr;
+      grid-template-columns: minmax(320px, 420px) 1fr;
       gap: 16px;
       min-height: 0;
     }
@@ -132,12 +134,14 @@ export function renderIndexHtml(serviceTitle: string): string {
     .detail-scroll {
       flex: 1 1 auto;
       min-height: 0;
-      overflow: auto;
-      padding: 12px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 10px;
       display: grid;
       gap: 10px;
       overscroll-behavior: contain;
       scrollbar-gutter: stable both-edges;
+      -webkit-overflow-scrolling: touch;
     }
 
     .module-item {
@@ -149,6 +153,9 @@ export function renderIndexHtml(serviceTitle: string): string {
       gap: 8px;
       cursor: pointer;
       transition: border-color 140ms ease, transform 140ms ease;
+      text-align: left;
+      font: inherit;
+      font-size: 0.92rem;
     }
 
     .module-item:hover {
@@ -176,10 +183,11 @@ export function renderIndexHtml(serviceTitle: string): string {
       display: inline-flex;
       align-items: center;
       border-radius: 999px;
-      padding: 0.2rem 0.55rem;
-      font-size: 0.75rem;
+      padding: 0.12rem 0.45rem;
+      font-size: 0.68rem;
       border: 1px solid var(--border);
       background: #f8fafc;
+      line-height: 1.2;
     }
 
     .chip.good {
@@ -238,9 +246,10 @@ export function renderIndexHtml(serviceTitle: string): string {
       color: #e2e8f0;
       border-radius: 8px;
       padding: 10px;
-      overflow: auto;
-      max-height: 280px;
-      font-size: 13px;
+      overflow-x: auto;
+      overflow-y: visible;
+      max-height: none;
+      font-size: 12px;
       line-height: 1.45;
       scrollbar-gutter: stable both-edges;
     }
