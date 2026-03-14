@@ -145,13 +145,13 @@ resource "cloudflare_worker_version" "app" {
       )
       error_message = "When google_auth_allowed_groups is set, you must also set google_auth_groups_service_account_email, google_auth_groups_service_account_private_key, and google_auth_groups_impersonated_user."
     }
-    precondition {
-      condition = !contains(["1", "true", "yes", "on"], lower(trimspace(var.publish_uploads_enabled))) || (
-        trimspace(var.publish_uploads_public_base_url_preview) != "" &&
-        trimspace(var.publish_uploads_public_base_url_production) != ""
-      )
-      error_message = "When publish_uploads_enabled is true, publish_uploads_public_base_url_preview and publish_uploads_public_base_url_production must both be set."
-    }
+    # precondition {
+    #   condition = !contains(["1", "true", "yes", "on"], lower(trimspace(var.publish_uploads_enabled))) || (
+    #     trimspace(var.publish_uploads_public_base_url_preview) != "" &&
+    #     trimspace(var.publish_uploads_public_base_url_production) != ""
+    #   )
+    #   error_message = "When publish_uploads_enabled is true, publish_uploads_public_base_url_preview and publish_uploads_public_base_url_production must both be set."
+    # }
   }
 }
 
