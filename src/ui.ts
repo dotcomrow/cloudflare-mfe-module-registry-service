@@ -135,10 +135,11 @@ export function renderIndexHtml(serviceTitle: string): string {
     }
 
     .detail-scroll {
-      overflow-y: auto;
-      overflow-x: hidden;
-      scrollbar-gutter: stable;
-      overscroll-behavior: contain;
+      overflow: visible;
+      max-height: none;
+      height: auto;
+      scrollbar-gutter: auto;
+      overscroll-behavior: auto;
     }
 
     .module-item {
