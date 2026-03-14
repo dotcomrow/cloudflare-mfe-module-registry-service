@@ -15,6 +15,7 @@ const DEFAULT_MAX_MANIFEST_BYTES = 5 * 1024 * 1024;
 interface ParsedPublishRequest {
   payload: PublishPayload;
   requestBodyText: string;
+  manifestDocument: Record<string, unknown> | null;
 }
 
 function addCorsHeaders(response: Response): Response {
@@ -298,6 +299,7 @@ async function uploadPublishAssetToR2(
 async function parseMultipartPublishRequest(request: Request, env: Env): Promise<ParsedPublishRequest> {
   const form = await request.formData();
   const publicBaseUrl = resolvePublicAssetBaseUrl(request, env);
+  let manifestDocument: Record<string, unknown> | null = null;
 
   const formPayload = parseMultipartFields(form);
   let rawPayload: Record<string, unknown> = formPayload;
@@ -337,6 +339,19 @@ async function parseMultipartPublishRequest(request: Request, env: Env): Promise
     if (!(manifestFile instanceof File)) {
       throw new HttpError(400, "manifest_file must be a file.");
     }
+
+    const manifestText = await manifestFile.text();
+    let parsedManifest: unknown;
+    try {
+      parsedManifest = JSON.parse(manifestText);
+    } catch {
+      throw new HttpError(400, "manifest_file must contain valid JSON.");
+    }
+    if (!isRecord(parsedManifest)) {
+      throw new HttpError(400, "manifest_file must contain a JSON object.");
+    }
+    manifestDocument = parsedManifest;
+
     const uploaded = await uploadPublishAssetToR2(env, publicBaseUrl, rawPayload, manifestFile, "manifest");
     rawPayload.manifest_url = uploaded.url;
   }
@@ -368,6 +383,7 @@ async function parseMultipartPublishRequest(request: Request, env: Env): Promise
   return {
     payload,
     requestBodyText,
+    manifestDocument,
   };
 }
 
@@ -389,6 +405,7 @@ async function parseJsonPublishRequest(request: Request): Promise<ParsedPublishR
   return {
     payload,
     requestBodyText: bodyText || "{}",
+    manifestDocument: null,
   };
 }
 
@@ -516,7 +533,7 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
 
   if (request.method === "POST" && pathname === "/v1/modules/publish") {
     const principal = await requireGooglePublishAuth(request, env);
-    const { payload, requestBodyText } = await parsePublishRequest(request, env);
+    const { payload, requestBodyText, manifestDocument } = await parsePublishRequest(request, env);
     const idempotencyKey = request.headers.get("x-idempotency-key");
     const strictValidation = toBooleanFlag(env.PUBLISH_VALIDATION_STRICT, true);
     const validationOptions = {
@@ -526,6 +543,7 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
       verifyAssetUrls: toBooleanFlag(env.PUBLISH_VALIDATION_VERIFY_ASSET_URLS, false),
       validateManifestDocument: toBooleanFlag(env.PUBLISH_VALIDATION_VALIDATE_MANIFEST, strictValidation),
       remoteFetchTimeoutMs: parseBoundedInteger(env.PUBLISH_VALIDATION_TIMEOUT_MS, 8000, 1000, 30000),
+      manifestDocument,
     };
 
     const result = await publishModuleVersion(

@@ -68,6 +68,7 @@ export interface PublishValidationOptions {
   verifyAssetUrls?: boolean;
   validateManifestDocument?: boolean;
   remoteFetchTimeoutMs?: number;
+  manifestDocument?: Record<string, unknown> | null;
 }
 
 interface ResolvedPublishValidationOptions {
@@ -876,6 +877,7 @@ export async function publishModuleVersion(
   await ensureRegistrySchema(db);
 
   const validation = resolvePublishValidationOptions(validationOptions);
+  const providedManifestDocument = isRecord(validationOptions?.manifestDocument) ? validationOptions?.manifestDocument : null;
   const now = nowIso();
   const publishedAt = payload.published_at ?? now;
   const definitionRef = payload.definition ?? {};
@@ -897,11 +899,13 @@ export async function publishModuleVersion(
   validateModuleMetadataForPublish(payload, definitionDoc, seedDoc, validation);
 
   if (validation.validateManifestDocument) {
-    const manifestDoc = await fetchJsonDocument(payload.manifest_url, {}, {
-      fieldName: "manifest",
-      required: true,
-      timeoutMs: validation.remoteFetchTimeoutMs,
-    });
+    const manifestDoc =
+      providedManifestDocument ??
+      (await fetchJsonDocument(payload.manifest_url, {}, {
+        fieldName: "manifest",
+        required: true,
+        timeoutMs: validation.remoteFetchTimeoutMs,
+      }));
     validateManifestCompatibility(payload, manifestDoc);
   }
 
