@@ -87,26 +87,6 @@ resource "cloudflare_worker_version" "app" {
     },
     {
       type = "plain_text"
-      name = "GOOGLE_AUTH_ALLOWED_GROUPS"
-      text = var.google_auth_allowed_groups
-    },
-    {
-      type = "plain_text"
-      name = "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_EMAIL"
-      text = var.google_auth_groups_service_account_email
-    },
-    {
-      type = "plain_text"
-      name = "GOOGLE_AUTH_GROUPS_IMPERSONATED_USER"
-      text = var.google_auth_groups_impersonated_user
-    },
-    {
-      type = "plain_text"
-      name = "GOOGLE_AUTH_GROUPS_CACHE_TTL_SECONDS"
-      text = tostring(var.google_auth_groups_cache_ttl_seconds)
-    },
-    {
-      type = "plain_text"
       name = "PUBLISH_UPLOADS_ENABLED"
       text = var.publish_uploads_enabled
     },
@@ -159,11 +139,6 @@ resource "cloudflare_worker_version" "app" {
       type = "plain_text"
       name = "PUBLISH_VALIDATION_TIMEOUT_MS"
       text = tostring(var.publish_validation_timeout_ms)
-    },
-    {
-      type = "secret_text"
-      name = "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_PRIVATE_KEY"
-      text = var.google_auth_groups_service_account_private_key
     }
   ]
 
@@ -177,14 +152,6 @@ resource "cloudflare_worker_version" "app" {
         trimspace(var.google_auth_allowed_audience) == trimspace(var.google_auth_allowed_audiences)
       )
       error_message = "google_auth_allowed_audience and google_auth_allowed_audiences cannot conflict; use one shared audience value."
-    }
-    precondition {
-      condition = trimspace(var.google_auth_allowed_groups) == "" || (
-        trimspace(var.google_auth_groups_service_account_email) != "" &&
-        trimspace(var.google_auth_groups_service_account_private_key) != "" &&
-        trimspace(var.google_auth_groups_impersonated_user) != ""
-      )
-      error_message = "When google_auth_allowed_groups is set, you must also set google_auth_groups_service_account_email, google_auth_groups_service_account_private_key, and google_auth_groups_impersonated_user."
     }
   }
 }

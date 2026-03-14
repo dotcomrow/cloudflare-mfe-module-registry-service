@@ -253,37 +253,6 @@ variable "google_auth_allowed_domains" {
   default     = ""
 }
 
-variable "google_auth_allowed_groups" {
-  type        = string
-  description = "GOOGLE_AUTH_ALLOWED_GROUPS binding value."
-  default     = "mfe-registry-access@suncoast.systems"
-}
-
-variable "google_auth_groups_service_account_email" {
-  type        = string
-  description = "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_EMAIL binding value."
-  default     = ""
-}
-
-variable "google_auth_groups_service_account_private_key" {
-  type        = string
-  description = "GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_PRIVATE_KEY binding value."
-  sensitive   = true
-  default     = ""
-}
-
-variable "google_auth_groups_impersonated_user" {
-  type        = string
-  description = "GOOGLE_AUTH_GROUPS_IMPERSONATED_USER binding value."
-  default     = ""
-}
-
-variable "google_auth_groups_cache_ttl_seconds" {
-  type        = number
-  description = "GOOGLE_AUTH_GROUPS_CACHE_TTL_SECONDS binding value."
-  default     = 300
-}
-
 variable "publish_uploads_enabled" {
   type        = string
   description = "PUBLISH_UPLOADS_ENABLED binding value."

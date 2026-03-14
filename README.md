@@ -96,15 +96,13 @@ Set these in Wrangler env vars:
 - `GOOGLE_AUTH_ALLOWED_AUDIENCES` (legacy CSV fallback; used only when `GOOGLE_AUTH_ALLOWED_AUDIENCE` is empty)
 - `GOOGLE_AUTH_ALLOWED_EMAILS` (optional comma-separated allow-list)
 - `GOOGLE_AUTH_ALLOWED_DOMAINS` (optional comma-separated email domains)
-- `GOOGLE_AUTH_ALLOWED_GROUPS` (optional comma-separated Google Group emails)
-- `GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_EMAIL` (required when `GOOGLE_AUTH_ALLOWED_GROUPS` is set)
-- `GOOGLE_AUTH_GROUPS_SERVICE_ACCOUNT_PRIVATE_KEY` (required when `GOOGLE_AUTH_ALLOWED_GROUPS` is set)
-- `GOOGLE_AUTH_GROUPS_IMPERSONATED_USER` (required when `GOOGLE_AUTH_ALLOWED_GROUPS` is set)
-- `GOOGLE_AUTH_GROUPS_CACHE_TTL_SECONDS` (optional, default `300`, max `3600`)
 
 If both `GOOGLE_AUTH_ALLOWED_EMAILS` and `GOOGLE_AUTH_ALLOWED_DOMAINS` are empty, token audience validation is the main gate.
 
-When `GOOGLE_AUTH_ALLOWED_GROUPS` is set, publish access additionally requires membership in at least one configured Google Group.
+For CI-only publish with a Google service account key, prefer:
+
+- `GOOGLE_AUTH_ALLOWED_EMAILS` set to the exact service account email used by CI
+- `GOOGLE_AUTH_ALLOWED_AUDIENCE` set to your registry URL audience
 
 ## Publish Validation Gates
 
@@ -118,17 +116,6 @@ Publish API validation defaults to strict mode and can be tuned with env vars:
 - `PUBLISH_VALIDATION_TIMEOUT_MS` (`8000` default; clamped to `1000..30000`)
 
 When strict validation is enabled, publish requires complete definition/seed metadata suitable for Directus rendering and rejects mismatches (for example payload `module_key` vs metadata `module_key`).
-
-## Google Group Setup (Workspace)
-
-To enforce group membership, configure Google Workspace:
-
-1. Create a service account in Google Cloud.
-2. Enable domain-wide delegation for that service account.
-3. In Google Workspace Admin, authorize this OAuth scope for the service account client:
-   - `https://www.googleapis.com/auth/admin.directory.group.member.readonly`
-4. Set `GOOGLE_AUTH_GROUPS_IMPERSONATED_USER` to an admin user that can read group memberships.
-5. Add publisher users to your selected Google Group(s), then set those group emails in `GOOGLE_AUTH_ALLOWED_GROUPS`.
 
 ## Local Development
 
@@ -189,11 +176,6 @@ Optional Terraform variables:
 - `google_auth_allowed_audience` (preferred shared value for both preview/prod)
 - `google_auth_allowed_audiences` (legacy fallback CSV)
 - `google_auth_allowed_emails`, `google_auth_allowed_domains`
-- `google_auth_allowed_groups`
-- `google_auth_groups_service_account_email`
-- `google_auth_groups_service_account_private_key` (sensitive)
-- `google_auth_groups_impersonated_user`
-- `google_auth_groups_cache_ttl_seconds`
 - `publish_uploads_enabled`
 - `publish_uploads_public_base_url_preview`, `publish_uploads_public_base_url_production` (optional URL overrides)
 - `publish_uploads_r2_prefix`
