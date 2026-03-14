@@ -31,24 +31,20 @@ export function renderIndexHtml(serviceTitle: string): string {
     }
 
     * { box-sizing: border-box; }
-    html, body { height: 100%; }
 
     body {
       margin: 0;
       font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: var(--text);
       background: linear-gradient(180deg, #f8fafc 0%, #eff6ff 100%);
-      height: 100%;
-      overflow: hidden;
+      min-height: 100vh;
     }
 
     .shell {
       max-width: 1320px;
       margin: 0 auto;
       padding: 24px;
-      height: 100%;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
       gap: 16px;
     }
 
@@ -107,7 +103,7 @@ export function renderIndexHtml(serviceTitle: string): string {
       display: grid;
       grid-template-columns: minmax(320px, 420px) 1fr;
       gap: 16px;
-      min-height: 0;
+      min-height: 70vh;
     }
 
     .panel {
@@ -118,7 +114,7 @@ export function renderIndexHtml(serviceTitle: string): string {
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      min-height: 0;
+      min-height: 300px;
     }
 
     .panel-header {
@@ -131,9 +127,8 @@ export function renderIndexHtml(serviceTitle: string): string {
 
     .list-scroll,
     .detail-scroll {
-      flex: 1 1 auto;
-      min-height: 0;
       overflow: auto;
+      max-height: calc(100vh - 240px);
       padding: 10px;
       display: grid;
       gap: 10px;
@@ -301,16 +296,9 @@ export function renderIndexHtml(serviceTitle: string): string {
     }
 
     @media (max-width: 980px) {
-      body {
-        height: auto;
-        min-height: 100vh;
-        overflow: auto;
-      }
-      .shell {
-        height: auto;
-      }
       .toolbar { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
+      .list-scroll, .detail-scroll { max-height: none; }
       .kv { grid-template-columns: 1fr; }
     }
   </style>
