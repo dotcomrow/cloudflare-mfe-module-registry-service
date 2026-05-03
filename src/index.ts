@@ -32,7 +32,12 @@ function addCorsHeaders(response: Response): Response {
 }
 
 function isApiPath(pathname: string): boolean {
-  return pathname.startsWith("/api/") || pathname.startsWith("/v1/") || pathname === "/healthz";
+  return (
+    pathname.startsWith("/api/")
+    || pathname.startsWith("/v1/")
+    || pathname.startsWith("/assets/")
+    || pathname === "/healthz"
+  );
 }
 
 function parsePathSegment(value: string): string {
