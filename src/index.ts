@@ -1,5 +1,12 @@
 import { requireGooglePublishAuth } from "./google-auth";
-import { getModuleDetails, getModuleVersion, listModules, publishModuleVersion, validatePublishPayload } from "./registry";
+import {
+  getModuleDetails,
+  getModuleVersion,
+  listModules,
+  promoteModuleVersion,
+  publishModuleVersion,
+  validatePublishPayload,
+} from "./registry";
 import type { Env, PublishChannel, PublishPayload } from "./types";
 import { renderIndexHtml } from "./ui";
 import { HttpError, isRecord, jsonResponse, toBooleanFlag } from "./util";
@@ -16,6 +23,14 @@ interface ParsedPublishRequest {
   payload: PublishPayload;
   requestBodyText: string;
   manifestDocument: Record<string, unknown> | null;
+}
+
+interface ParsedPromoteRequest {
+  moduleKey: string;
+  moduleVersion: string;
+  sourceChannel: PublishChannel;
+  targetChannel: PublishChannel;
+  publishedAt?: string;
 }
 
 function addCorsHeaders(response: Response): Response {
@@ -157,10 +172,10 @@ function parseAssetObjectKey(pathname: string): string {
   return segments.join("/");
 }
 
-function getRequiredPayloadString(payload: Record<string, unknown>, key: string): string {
+function getRequiredPayloadString(payload: Record<string, unknown>, key: string, context = "Publish payload"): string {
   const value = payload[key];
   if (typeof value !== "string" || value.trim() === "") {
-    throw new HttpError(400, `Publish payload is missing required field '${key}'.`);
+    throw new HttpError(400, `${context} is missing required field '${key}'.`);
   }
   return value.trim();
 }
@@ -169,6 +184,14 @@ function parsePayloadChannel(payload: Record<string, unknown>): PublishChannel {
   const channel = getRequiredPayloadString(payload, "channel").toLowerCase();
   if (channel !== "preview" && channel !== "prod") {
     throw new HttpError(400, "Invalid publish channel. Expected 'preview' or 'prod'.");
+  }
+  return channel;
+}
+
+function parseRequiredChannelField(payload: Record<string, unknown>, fieldName: string, context: string): PublishChannel {
+  const channel = getRequiredPayloadString(payload, fieldName, context).toLowerCase();
+  if (channel !== "preview" && channel !== "prod") {
+    throw new HttpError(400, `Invalid ${fieldName}. Expected 'preview' or 'prod'.`);
   }
   return channel;
 }
@@ -422,6 +445,51 @@ async function parsePublishRequest(request: Request, env: Env): Promise<ParsedPu
   return parseJsonPublishRequest(request);
 }
 
+async function parsePromoteRequest(request: Request): Promise<ParsedPromoteRequest> {
+  const bodyText = await request.text();
+  if (bodyText.length > MAX_JSON_PUBLISH_BODY_BYTES) {
+    throw new HttpError(413, "Promote payload too large.");
+  }
+
+  let rawPayload: unknown;
+  try {
+    rawPayload = JSON.parse(bodyText || "{}");
+  } catch {
+    throw new HttpError(400, "Promote payload must be valid JSON.");
+  }
+
+  if (!isRecord(rawPayload)) {
+    throw new HttpError(400, "Promote payload must be a JSON object.");
+  }
+
+  const context = "Promote payload";
+  const moduleKey = getRequiredPayloadString(rawPayload, "module_key", context);
+  const moduleVersion = getRequiredPayloadString(rawPayload, "module_version", context);
+  const sourceChannel = parseRequiredChannelField(rawPayload, "source_channel", context);
+  const targetChannel = parseRequiredChannelField(rawPayload, "target_channel", context);
+
+  if (sourceChannel === targetChannel) {
+    throw new HttpError(400, "source_channel and target_channel must be different.");
+  }
+
+  const publishedAtRaw = rawPayload.published_at;
+  let publishedAt: string | undefined;
+  if (publishedAtRaw !== undefined && publishedAtRaw !== null) {
+    if (typeof publishedAtRaw !== "string" || publishedAtRaw.trim() === "") {
+      throw new HttpError(400, "published_at must be a non-empty string when provided.");
+    }
+    publishedAt = publishedAtRaw.trim();
+  }
+
+  return {
+    moduleKey,
+    moduleVersion,
+    sourceChannel,
+    targetChannel,
+    publishedAt,
+  };
+}
+
 function buildErrorResponse(error: unknown): Response {
   if (error instanceof HttpError) {
     return jsonResponse(
@@ -558,6 +626,36 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
       requestBodyText,
       idempotencyKey,
       validationOptions,
+    );
+    return jsonResponse(result, 200, API_HEADERS);
+  }
+
+  if (request.method === "POST" && pathname === "/v1/modules/promote") {
+    const principal = await requireGooglePublishAuth(request, env);
+    const payload = await parsePromoteRequest(request);
+    const idempotencyKey = request.headers.get("x-idempotency-key");
+    const strictValidation = toBooleanFlag(env.PUBLISH_VALIDATION_STRICT, true);
+    const validationOptions = {
+      strictMode: strictValidation,
+      requirePropsSchema: toBooleanFlag(env.PUBLISH_VALIDATION_REQUIRE_PROPS_SCHEMA, strictValidation),
+      requireDefaultProps: toBooleanFlag(env.PUBLISH_VALIDATION_REQUIRE_DEFAULT_PROPS, strictValidation),
+      verifyAssetUrls: toBooleanFlag(env.PUBLISH_VALIDATION_VERIFY_ASSET_URLS, false),
+      validateManifestDocument: false,
+      remoteFetchTimeoutMs: parseBoundedInteger(env.PUBLISH_VALIDATION_TIMEOUT_MS, 8000, 1000, 30000),
+    };
+
+    const result = await promoteModuleVersion(
+      env.REGISTRY_DB,
+      payload.moduleKey,
+      payload.moduleVersion,
+      payload.sourceChannel,
+      payload.targetChannel,
+      principal,
+      idempotencyKey,
+      {
+        publishedAt: payload.publishedAt,
+        validationOptions,
+      },
     );
     return jsonResponse(result, 200, API_HEADERS);
   }

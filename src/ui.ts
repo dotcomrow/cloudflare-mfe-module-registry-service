@@ -314,6 +314,23 @@ export function renderIndexHtml(serviceTitle: string): string {
       color: #0f766e;
     }
 
+    .row-links .promote-btn {
+      border: 1px solid #93c5fd;
+      background: #eff6ff;
+      color: #1d4ed8;
+      font-size: 0.82rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .row-links .promote-btn:hover {
+      border-color: #3b82f6;
+      color: #1e40af;
+      background: #dbeafe;
+    }
+
     @media (max-width: 980px) {
       .toolbar { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
@@ -369,7 +386,8 @@ export function renderIndexHtml(serviceTitle: string): string {
         channel: "all",
         modules: [],
         selectedKey: null,
-        selectedDetails: null
+        selectedDetails: null,
+        publishToken: ""
       };
 
       var searchEl = document.getElementById("search");
@@ -425,6 +443,31 @@ export function renderIndexHtml(serviceTitle: string): string {
               return payload;
             });
           });
+      }
+
+      function postJson(path, body, extraHeaders) {
+        var headers = Object.assign(
+          {
+            accept: "application/json",
+            "content-type": "application/json"
+          },
+          extraHeaders || {}
+        );
+
+        return fetch(path, {
+          method: "POST",
+          headers: headers,
+          body: JSON.stringify(body || {})
+        }).then(function (response) {
+          return response.text().then(function (text) {
+            var payload = text ? JSON.parse(text) : {};
+            if (!response.ok) {
+              var errorMessage = payload && payload.error ? payload.error : ("Request failed (" + response.status + ")");
+              throw new Error(typeof errorMessage === "string" ? errorMessage : JSON.stringify(errorMessage));
+            }
+            return payload;
+          });
+        });
       }
 
       function renderModuleList() {
@@ -516,6 +559,17 @@ export function renderIndexHtml(serviceTitle: string): string {
             links += '<a href="' + escapeUnsafe(version.seed_ref.url) + '" target="_blank" rel="noopener noreferrer">seed</a>';
           }
 
+          var sourceChannel = String(version.channel || "").toLowerCase();
+          var targetChannel = sourceChannel === "preview" ? "prod" : (sourceChannel === "prod" ? "preview" : "");
+          var canPromote = targetChannel === "preview" || targetChannel === "prod";
+          if (canPromote) {
+            links +=
+              '<button type="button" class="promote-btn" data-promote-module="' + escapeUnsafe(module.module_key || state.selectedKey || "") +
+              '" data-promote-version="' + escapeUnsafe(version.module_version || "") +
+              '" data-promote-source="' + escapeUnsafe(sourceChannel) +
+              '" data-promote-target="' + escapeUnsafe(targetChannel) + '">Promote to ' + escapeUnsafe(targetChannel) + "</button>";
+          }
+
           versionRows +=
             '<article class="version">' +
               '<div class="version-head">' +
@@ -544,6 +598,75 @@ export function renderIndexHtml(serviceTitle: string): string {
           '</section>';
 
         detailsEl.innerHTML = summaryHtml + latestHtml + historyHtml;
+        detailsEl.querySelectorAll("[data-promote-target]").forEach(function (element) {
+          element.addEventListener("click", function () {
+            var moduleKey = element.getAttribute("data-promote-module") || "";
+            var moduleVersion = element.getAttribute("data-promote-version") || "";
+            var sourceChannel = element.getAttribute("data-promote-source") || "";
+            var targetChannel = element.getAttribute("data-promote-target") || "";
+            void promoteVersion({
+              moduleKey: moduleKey,
+              moduleVersion: moduleVersion,
+              sourceChannel: sourceChannel,
+              targetChannel: targetChannel
+            });
+          });
+        });
+      }
+
+      function getPublishToken() {
+        if (state.publishToken) return state.publishToken;
+        var token = window.prompt("Enter publish bearer token for /v1/modules/promote");
+        state.publishToken = String(token || "").trim();
+        return state.publishToken;
+      }
+
+      function promoteVersion(context) {
+        var moduleKey = String(context && context.moduleKey || "").trim();
+        var moduleVersion = String(context && context.moduleVersion || "").trim();
+        var sourceChannel = String(context && context.sourceChannel || "").trim();
+        var targetChannel = String(context && context.targetChannel || "").trim();
+        if (!moduleKey || !moduleVersion || !sourceChannel || !targetChannel) {
+          setStatus("Missing module promotion values.", true);
+          return Promise.resolve(null);
+        }
+
+        var token = getPublishToken();
+        if (!token) {
+          setStatus("Promotion canceled: no bearer token.", true);
+          return Promise.resolve(null);
+        }
+
+        var idempotencyKey = [
+          "promote",
+          moduleKey,
+          moduleVersion,
+          sourceChannel,
+          targetChannel,
+          Date.now()
+        ].join(":");
+
+        setStatus("Promoting " + moduleKey + "@" + moduleVersion + " (" + sourceChannel + " -> " + targetChannel + ") ...", false);
+
+        return postJson(
+          "/v1/modules/promote",
+          {
+            module_key: moduleKey,
+            module_version: moduleVersion,
+            source_channel: sourceChannel,
+            target_channel: targetChannel
+          },
+          {
+            authorization: "Bearer " + token,
+            "x-idempotency-key": idempotencyKey
+          }
+        ).then(function () {
+          setStatus("Promoted " + moduleKey + "@" + moduleVersion + " to " + targetChannel + ".", false);
+          return loadModuleList(true);
+        }).catch(function (error) {
+          setStatus(error.message || "Failed to promote module version.", true);
+          return null;
+        });
       }
 
       function loadModuleList(keepSelection) {
