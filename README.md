@@ -7,6 +7,7 @@ Cloudflare Worker + D1 service for MFE catalog management.
 - Public registry UI (`/`) for browsing published MFEs.
 - Public read APIs for module list/details.
 - Authenticated publish API (`POST /v1/modules/publish`) for CI publishers.
+- Authenticated promotion API (`POST /v1/modules/promote`) to copy an existing version from one channel to the other.
 - Idempotent publish handling (`x-idempotency-key`) to make retries safe.
 - Storage of module metadata, versions, integration info, parameter info, and optional screenshots metadata.
 - Strict, configurable publish validation to block incomplete module metadata.
@@ -18,6 +19,7 @@ Cloudflare Worker + D1 service for MFE catalog management.
 - `GET /api/modules/:module_key`
 - `GET /api/modules/:module_key/:module_version?channel=preview|prod`
 - `POST /v1/modules/publish` (Google-auth protected, supports JSON metadata or multipart file upload)
+- `POST /v1/modules/promote` (Google-auth protected, promotes an existing published version to another channel)
 
 Directus integration uses:
 
@@ -83,6 +85,23 @@ curl -X POST "https://<host>/v1/modules/publish" \
   -F "channel=preview" \
   -F "bundle_file=@./dist/example-mfe.js;type=application/javascript" \
   -F "manifest_file=@./dist/module.publish.json;type=application/json"
+```
+
+### Promote Existing Version To Another Channel
+
+Use this when you want the same `module_key` + `module_version` available in both `preview` and `prod` without rebuilding or re-uploading artifacts.
+
+```bash
+curl -X POST "https://<host>/v1/modules/promote" \
+  -H "Authorization: Bearer <google-token>" \
+  -H "Content-Type: application/json" \
+  -H "x-idempotency-key: <unique-key>" \
+  --data '{
+    "module_key": "mfe-example-chat",
+    "module_version": "sha-deaaa3b9a404",
+    "source_channel": "prod",
+    "target_channel": "preview"
+  }'
 ```
 
 ## Google Auth For Publish API

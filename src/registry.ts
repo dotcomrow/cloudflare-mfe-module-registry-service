@@ -848,6 +848,63 @@ export async function getModuleVersion(
   return toVersionRecord(row);
 }
 
+export interface PromoteModuleVersionOptions {
+  publishedAt?: string;
+  validationOptions?: PublishValidationOptions;
+}
+
+export async function promoteModuleVersion(
+  db: D1Database,
+  moduleKey: string,
+  moduleVersion: string,
+  sourceChannel: PublishChannel,
+  targetChannel: PublishChannel,
+  principal: AuthPrincipal,
+  idempotencyKeyHeader: string | null,
+  options?: PromoteModuleVersionOptions,
+): Promise<Record<string, unknown>> {
+  if (sourceChannel === targetChannel) {
+    throw new HttpError(400, "source_channel and target_channel must be different.");
+  }
+
+  const source = await getModuleVersion(db, moduleKey, moduleVersion, sourceChannel);
+  const publishedAt = asNonEmptyString(options?.publishedAt) ?? undefined;
+
+  const payload: PublishPayload = {
+    module_key: source.module_key,
+    module_version: source.module_version,
+    channel: targetChannel,
+    published_at: publishedAt,
+    provider: source.provider ?? undefined,
+    component_type: source.component_type ?? undefined,
+    bundle_url: source.bundle_url,
+    manifest_url: source.manifest_url,
+    release: source.release,
+    definition: source.definition,
+    seed: source.seed,
+    checksums: source.checksums,
+  };
+
+  const result = await publishModuleVersion(
+    db,
+    payload,
+    principal,
+    JSON.stringify(payload),
+    idempotencyKeyHeader,
+    options?.validationOptions,
+  );
+
+  return {
+    ok: true,
+    action: "promote",
+    module_key: payload.module_key,
+    module_version: payload.module_version,
+    source_channel: sourceChannel,
+    target_channel: targetChannel,
+    publish_result: result,
+  };
+}
+
 async function findExistingPublishResponse(db: D1Database, idempotencyKey: string): Promise<Record<string, unknown> | null> {
   const existing = await db
     .prepare("SELECT response_json FROM publish_events WHERE idempotency_key = ? LIMIT 1")
