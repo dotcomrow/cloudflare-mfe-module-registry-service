@@ -8,6 +8,7 @@ Cloudflare Worker + D1 service for MFE catalog management.
 - Public read APIs for module list/details.
 - Authenticated publish API (`POST /v1/modules/publish`) for CI publishers.
 - Authenticated promotion API (`POST /v1/modules/promote`) to copy an existing version from one channel to the other.
+- Auth app registry APIs for auth-gateway slug/base URL management and k8s sync.
 - Idempotent publish handling (`x-idempotency-key`) to make retries safe.
 - Storage of module metadata, versions, integration info, parameter info, and optional screenshots metadata.
 - Strict, configurable publish validation to block incomplete module metadata.
@@ -18,6 +19,9 @@ Cloudflare Worker + D1 service for MFE catalog management.
 - `GET /api/modules?channel=all|preview|prod&q=<search>&limit=100&offset=0`
 - `GET /api/modules/:module_key`
 - `GET /api/modules/:module_key/:module_version?channel=preview|prod`
+- `GET /api/auth/apps?enabled=all|enabled|disabled&limit=500&offset=0` (optional bearer token via `AUTH_APPS_READ_TOKEN`)
+- `GET /api/auth/apps/:slug` (optional bearer token via `AUTH_APPS_READ_TOKEN`)
+- `POST /v1/auth/apps/upsert` (Google-auth protected)
 - `POST /v1/modules/publish` (Google-auth protected, supports JSON metadata or multipart file upload)
 - `POST /v1/modules/promote` (Google-auth protected, promotes an existing published version to another channel)
 
@@ -52,6 +56,28 @@ Directus integration uses:
 ```
 
 The service fetches `definition.url` and `seed.url` (if present) to enrich catalog metadata.
+
+### Auth App Registry
+
+Use this to store auth-gateway app registrations (`slug`, `display_name`, `base_url`, `base_urls`, `enabled`) in D1 as source-of-truth.
+
+Example upsert:
+
+```bash
+curl -X POST "https://<host>/v1/auth/apps/upsert" \
+  -H "Authorization: Bearer <google-token>" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "slug": "internal-prod",
+    "display_name": "Internal Production",
+    "base_url": "https://internal.suncoast.systems",
+    "base_urls": ["https://internal.suncoast.systems"],
+    "enabled": true,
+    "module_key": "mfe-internal-app-shell"
+  }'
+```
+
+If `AUTH_APPS_READ_TOKEN` is set, callers to `GET /api/auth/apps*` must send `Authorization: Bearer <AUTH_APPS_READ_TOKEN>`.
 
 ### Publish With Direct File Upload
 
@@ -195,6 +221,7 @@ Optional Terraform variables:
 - `google_auth_allowed_audience` (preferred shared value for both preview/prod)
 - `google_auth_allowed_audiences` (legacy fallback CSV)
 - `google_auth_allowed_emails`, `google_auth_allowed_domains`
+- `auth_apps_read_token` (optional bearer token required by auth app read endpoints)
 - `publish_uploads_enabled`
 - `publish_uploads_public_base_url_preview`, `publish_uploads_public_base_url_production` (optional URL overrides)
 - `publish_uploads_r2_prefix`

@@ -1,4 +1,6 @@
 import type {
+  AuthGatewayAppRecord,
+  AuthGatewayAppUpsertPayload,
   AuthPrincipal,
   ModuleSummary,
   ModuleVersionRecord,
@@ -8,6 +10,7 @@ import type {
 import { HttpError, asNonEmptyString, hashHexFromText, isRecord, nowIso, safeParseJson } from "./util";
 
 const MODULE_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const AUTH_APP_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
 
 const REGISTRY_SCHEMA_STATEMENTS: string[] = [
   "CREATE TABLE IF NOT EXISTS modules (module_key TEXT PRIMARY KEY, provider TEXT, component_type TEXT, latest_version_preview TEXT, latest_version_prod TEXT, latest_published_at_preview TEXT, latest_published_at_prod TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
@@ -17,6 +20,9 @@ const REGISTRY_SCHEMA_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS idx_module_versions_published_at ON module_versions(published_at DESC)",
   "CREATE TABLE IF NOT EXISTS publish_events (id INTEGER PRIMARY KEY AUTOINCREMENT, idempotency_key TEXT NOT NULL UNIQUE, module_key TEXT NOT NULL, module_version TEXT NOT NULL, channel TEXT NOT NULL, request_hash TEXT NOT NULL, principal TEXT, response_json TEXT NOT NULL, created_at TEXT NOT NULL)",
   "CREATE INDEX IF NOT EXISTS idx_publish_events_module ON publish_events(module_key, module_version, channel)",
+  "CREATE TABLE IF NOT EXISTS auth_gateway_apps (slug TEXT PRIMARY KEY, display_name TEXT NOT NULL, base_url TEXT NOT NULL, base_urls_json TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)), module_key TEXT, updated_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS idx_auth_gateway_apps_enabled ON auth_gateway_apps(enabled)",
+  "CREATE INDEX IF NOT EXISTS idx_auth_gateway_apps_module_key ON auth_gateway_apps(module_key)",
 ];
 
 let registrySchemaReady = false;
@@ -56,6 +62,18 @@ interface ModuleVersionRow {
   screenshots_json: string;
   integrations_json: string;
   parameters_json: string;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface AuthGatewayAppRow {
+  slug: string;
+  display_name: string;
+  base_url: string;
+  base_urls_json: string;
+  enabled: number;
+  module_key: string | null;
   updated_by: string | null;
   created_at: string;
   updated_at: string;
@@ -176,6 +194,104 @@ function validateModuleVersion(value: unknown): string {
     throw new HttpError(400, "module_version is too long.");
   }
   return moduleVersion;
+}
+
+function validateAuthAppSlug(value: unknown): string {
+  const slug = asNonEmptyString(value);
+  if (!slug) {
+    throw new HttpError(400, "slug is required.");
+  }
+  const normalized = slug.trim().toLowerCase();
+  if (!AUTH_APP_SLUG_PATTERN.test(normalized)) {
+    throw new HttpError(400, "slug has invalid format.", {
+      expected_pattern: AUTH_APP_SLUG_PATTERN.source,
+    });
+  }
+  return normalized;
+}
+
+function parseOptionalBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    if (value === 0) {
+      return false;
+    }
+    if (value === 1) {
+      return true;
+    }
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized.length === 0) {
+      return fallback;
+    }
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+  throw new HttpError(400, "enabled must be a boolean-compatible value.");
+}
+
+function normalizeAuthAppBaseUrls(value: unknown, baseUrl: string): string[] {
+  if (value === undefined || value === null) {
+    return [baseUrl];
+  }
+  if (!Array.isArray(value)) {
+    throw new HttpError(400, "base_urls must be an array of http(s) URLs.");
+  }
+  const normalized = value
+    .map((entry, index) => validateUrl(entry, `base_urls[${index}]`))
+    .filter((entry) => entry.length > 0);
+
+  const unique = Array.from(new Set(normalized));
+  if (!unique.includes(baseUrl)) {
+    unique.unshift(baseUrl);
+  }
+
+  if (unique.length === 0) {
+    throw new HttpError(400, "base_urls must include at least one URL.");
+  }
+  return unique;
+}
+
+export function validateAuthGatewayAppUpsertPayload(raw: unknown): AuthGatewayAppUpsertPayload {
+  if (!isRecord(raw)) {
+    throw new HttpError(400, "Auth app payload must be an object.");
+  }
+
+  const slug = validateAuthAppSlug(raw.slug);
+  const displayName = asNonEmptyString(raw.display_name);
+  if (!displayName) {
+    throw new HttpError(400, "display_name is required.");
+  }
+  const baseUrl = validateUrl(raw.base_url, "base_url");
+  const baseUrls = normalizeAuthAppBaseUrls(raw.base_urls, baseUrl);
+  const enabled = parseOptionalBoolean(raw.enabled, true);
+
+  const moduleKeyRaw = asNonEmptyString(raw.module_key);
+  let moduleKey: string | undefined;
+  if (moduleKeyRaw) {
+    if (!MODULE_KEY_PATTERN.test(moduleKeyRaw)) {
+      throw new HttpError(400, "module_key has invalid format.", {
+        expected_pattern: MODULE_KEY_PATTERN.source,
+      });
+    }
+    moduleKey = moduleKeyRaw;
+  }
+
+  return {
+    slug,
+    display_name: displayName,
+    base_url: baseUrl,
+    base_urls: baseUrls,
+    enabled,
+    module_key: moduleKey,
+  };
 }
 
 function normalizeRecord(value: unknown): Record<string, unknown> {
@@ -601,6 +717,41 @@ function toVersionRecord(row: ModuleVersionRow): ModuleVersionRecord {
   };
 }
 
+function toAuthGatewayAppRecord(row: AuthGatewayAppRow): AuthGatewayAppRecord {
+  const parsed = safeParseJson<unknown[]>(row.base_urls_json, []);
+  const normalizedBaseUrls = Array.isArray(parsed)
+    ? Array.from(
+      new Set(
+        parsed
+          .map((item) => asNonEmptyString(item))
+          .filter((item): item is string => typeof item === "string"),
+      ),
+    )
+    : [];
+
+  if (!normalizedBaseUrls.includes(row.base_url)) {
+    normalizedBaseUrls.unshift(row.base_url);
+  }
+
+  return {
+    slug: row.slug,
+    display_name: row.display_name,
+    base_url: row.base_url,
+    base_urls: normalizedBaseUrls,
+    enabled: Number(row.enabled) === 1,
+    module_key: row.module_key,
+    updated_by: row.updated_by,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+export interface ListAuthGatewayAppsOptions {
+  enabled?: "all" | "enabled" | "disabled";
+  limit?: number;
+  offset?: number;
+}
+
 export interface ListModulesOptions {
   q?: string;
   channel?: "all" | PublishChannel;
@@ -628,6 +779,141 @@ export async function ensureRegistrySchema(db: D1Database): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     throw new HttpError(500, "Unable to initialize registry database schema.", { cause: message });
   }
+}
+
+export async function listAuthGatewayApps(
+  db: D1Database,
+  options: ListAuthGatewayAppsOptions = {},
+): Promise<{ items: AuthGatewayAppRecord[]; total: number }> {
+  await ensureRegistrySchema(db);
+
+  const enabledFilter = options.enabled ?? "all";
+  const limit = Math.max(1, Math.min(1000, options.limit ?? 500));
+  const offset = Math.max(0, options.offset ?? 0);
+
+  const whereSql = `
+    WHERE (
+      ? = 'all'
+      OR (? = 'enabled' AND enabled = 1)
+      OR (? = 'disabled' AND enabled = 0)
+    )
+  `;
+
+  const bindValues = [enabledFilter, enabledFilter, enabledFilter] as const;
+
+  const totalResult = await db
+    .prepare(`SELECT COUNT(*) AS total FROM auth_gateway_apps ${whereSql}`)
+    .bind(...bindValues)
+    .first<{ total: number }>();
+
+  const rowsResult = await db
+    .prepare(
+      `
+      SELECT
+        slug,
+        display_name,
+        base_url,
+        base_urls_json,
+        enabled,
+        module_key,
+        updated_by,
+        created_at,
+        updated_at
+      FROM auth_gateway_apps
+      ${whereSql}
+      ORDER BY lower(slug) ASC
+      LIMIT ? OFFSET ?
+      `,
+    )
+    .bind(...bindValues, limit, offset)
+    .all<AuthGatewayAppRow>();
+
+  return {
+    items: (rowsResult.results ?? []).map(toAuthGatewayAppRecord),
+    total: Number(totalResult?.total ?? 0),
+  };
+}
+
+export async function getAuthGatewayApp(db: D1Database, slug: string): Promise<AuthGatewayAppRecord> {
+  await ensureRegistrySchema(db);
+  const normalizedSlug = validateAuthAppSlug(slug);
+
+  const row = await db
+    .prepare(
+      `
+      SELECT
+        slug,
+        display_name,
+        base_url,
+        base_urls_json,
+        enabled,
+        module_key,
+        updated_by,
+        created_at,
+        updated_at
+      FROM auth_gateway_apps
+      WHERE slug = ?
+      LIMIT 1
+      `,
+    )
+    .bind(normalizedSlug)
+    .first<AuthGatewayAppRow>();
+
+  if (!row) {
+    throw new HttpError(404, `Auth app '${normalizedSlug}' not found.`);
+  }
+
+  return toAuthGatewayAppRecord(row);
+}
+
+export async function upsertAuthGatewayApp(
+  db: D1Database,
+  payload: AuthGatewayAppUpsertPayload,
+  principal: AuthPrincipal,
+): Promise<AuthGatewayAppRecord> {
+  await ensureRegistrySchema(db);
+  const normalizedPayload = validateAuthGatewayAppUpsertPayload(payload);
+  const now = nowIso();
+  const updatedBy = principal.email ?? principal.subject;
+
+  await db
+    .prepare(
+      `
+      INSERT INTO auth_gateway_apps (
+        slug,
+        display_name,
+        base_url,
+        base_urls_json,
+        enabled,
+        module_key,
+        updated_by,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(slug) DO UPDATE SET
+        display_name = excluded.display_name,
+        base_url = excluded.base_url,
+        base_urls_json = excluded.base_urls_json,
+        enabled = excluded.enabled,
+        module_key = excluded.module_key,
+        updated_by = excluded.updated_by,
+        updated_at = excluded.updated_at
+      `,
+    )
+    .bind(
+      normalizedPayload.slug,
+      normalizedPayload.display_name,
+      normalizedPayload.base_url,
+      JSON.stringify(normalizedPayload.base_urls),
+      normalizedPayload.enabled ? 1 : 0,
+      normalizedPayload.module_key ?? null,
+      updatedBy,
+      now,
+      now,
+    )
+    .run();
+
+  return getAuthGatewayApp(db, normalizedPayload.slug);
 }
 
 export async function listModules(db: D1Database, options: ListModulesOptions): Promise<{ items: ModuleSummary[]; total: number }> {

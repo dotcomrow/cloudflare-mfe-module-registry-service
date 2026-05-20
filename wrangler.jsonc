@@ -12,6 +12,7 @@
       "vars": {
         "ENVIRONMENT": "dev",
         "SERVICE_TITLE": "MFE Module Registry",
+        "AUTH_APPS_READ_TOKEN": "",
         "GOOGLE_AUTH_ENABLED": "true",
         "GOOGLE_AUTH_ALLOWED_AUDIENCE": "https://cloudflare-mfe-module-registry-service.suncoast.systems/",
         "GOOGLE_AUTH_ALLOWED_AUDIENCES": "",
@@ -46,6 +47,7 @@
       "vars": {
         "ENVIRONMENT": "prod",
         "SERVICE_TITLE": "MFE Module Registry",
+        "AUTH_APPS_READ_TOKEN": "",
         "GOOGLE_AUTH_ENABLED": "true",
         "GOOGLE_AUTH_ALLOWED_AUDIENCE": "https://cloudflare-mfe-module-registry-service.suncoast.systems/",
         "GOOGLE_AUTH_ALLOWED_AUDIENCES": "",
