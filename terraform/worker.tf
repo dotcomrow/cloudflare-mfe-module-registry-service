@@ -62,6 +62,11 @@ resource "cloudflare_worker_version" "app" {
     },
     {
       type = "plain_text"
+      name = "AUTH_APPS_READ_TOKEN"
+      text = var.auth_apps_read_token
+    },
+    {
+      type = "plain_text"
       name = "GOOGLE_AUTH_ENABLED"
       text = var.google_auth_enabled
     },

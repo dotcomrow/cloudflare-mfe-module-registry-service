@@ -5,6 +5,7 @@ export interface Env {
   REGISTRY_ASSETS: R2Bucket;
   ENVIRONMENT?: string;
   SERVICE_TITLE?: string;
+  AUTH_APPS_READ_TOKEN?: string;
   GOOGLE_AUTH_ENABLED?: string;
   GOOGLE_AUTH_ALLOWED_AUDIENCE?: string;
   GOOGLE_AUTH_ALLOWED_AUDIENCES?: string;
@@ -36,6 +37,27 @@ export interface PublishPayload {
   definition?: Record<string, unknown>;
   seed?: Record<string, unknown>;
   checksums?: Record<string, unknown>;
+}
+
+export interface AuthGatewayAppUpsertPayload {
+  slug: string;
+  display_name: string;
+  base_url: string;
+  base_urls: string[];
+  enabled: boolean;
+  module_key?: string;
+}
+
+export interface AuthGatewayAppRecord {
+  slug: string;
+  display_name: string;
+  base_url: string;
+  base_urls: string[];
+  enabled: boolean;
+  module_key: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AuthPrincipal {
