@@ -275,7 +275,7 @@ variable "keycloak_auth_issuer" {
 variable "keycloak_auth_userinfo_url" {
   type        = string
   description = "Optional KEYCLOAK_AUTH_USERINFO_URL binding value. When empty, defaults to <issuer>/protocol/openid-connect/userinfo."
-  default     = ""
+  default     = "https://auth-origin.suncoast.systems/realms/internal/protocol/openid-connect/userinfo"
 }
 
 variable "keycloak_auth_userinfo_timeout_ms" {
