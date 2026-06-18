@@ -1,5 +1,5 @@
 import type { AuthPrincipal, Env } from "./types";
-import { HttpError, parseCsv, toBooleanFlag } from "./util";
+import { HttpError, isRecord, parseCsv, toBooleanFlag } from "./util";
 
 interface GoogleTokenInfo {
   aud?: string;
@@ -11,6 +11,13 @@ interface GoogleTokenInfo {
   expires_in?: string;
   iss?: string;
   error?: string;
+}
+
+interface KeycloakAuthConfig {
+  issuer: string;
+  userinfoUrl: string;
+  requiredRole: string;
+  audience?: string;
 }
 
 function extractBearerToken(request: Request): string {
@@ -26,45 +33,58 @@ function extractBearerToken(request: Request): string {
   return token;
 }
 
-async function fetchGoogleTokenInfo(token: string, mode: "id_token" | "access_token"): Promise<GoogleTokenInfo | null> {
-  const endpoint =
-    mode === "id_token"
-      ? `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`
-      : `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`;
+function parseNumericTimestamp(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("tokeninfo_timeout"), 8000);
+function collectStringArray(value: unknown): string[] {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized.length > 0 ? [normalized] : [];
+  }
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0);
+}
+
+function decodeBase64UrlText(base64url: string): string {
+  const normalized = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+function parseJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return null;
+  }
+
   try {
-    const response = await fetch(endpoint, {
-      method: "GET",
-      signal: controller.signal,
-      headers: { accept: "application/json" },
-    });
-
-    const payload = (await response.json().catch(() => ({}))) as GoogleTokenInfo;
-    if (!response.ok) {
-      return null;
-    }
-    return payload;
-  } finally {
-    clearTimeout(timeout);
+    const payloadText = decodeBase64UrlText(parts[1]);
+    const payload = JSON.parse(payloadText);
+    return isRecord(payload) ? payload : null;
+  } catch {
+    return null;
   }
 }
 
-function assertTokenFresh(tokenInfo: GoogleTokenInfo): void {
-  const nowEpoch = Math.floor(Date.now() / 1000);
-  const exp = Number.parseInt(tokenInfo.exp ?? "", 10);
-  if (Number.isFinite(exp) && exp < nowEpoch) {
-    throw new HttpError(401, "Google token is expired.");
-  }
-
-  const expiresIn = Number.parseInt(tokenInfo.expires_in ?? "", 10);
-  if (Number.isFinite(expiresIn) && expiresIn <= 0) {
-    throw new HttpError(401, "Google token is expired.");
-  }
+function normalizeIssuer(value: string): string {
+  return value.trim().replace(/\/+$/, "");
 }
 
-function resolveAllowedAudiences(env: Env): string[] {
+function resolveGoogleAllowedAudiences(env: Env): string[] {
   const singleAudience = (env.GOOGLE_AUTH_ALLOWED_AUDIENCE ?? "").trim();
   if (singleAudience) {
     return [singleAudience];
@@ -72,8 +92,21 @@ function resolveAllowedAudiences(env: Env): string[] {
   return parseCsv(env.GOOGLE_AUTH_ALLOWED_AUDIENCES);
 }
 
-function assertAudienceAllowed(tokenInfo: GoogleTokenInfo, env: Env): void {
-  const allowedAudiences = resolveAllowedAudiences(env);
+function assertTokenFresh(tokenInfo: { exp?: string; expires_in?: string }): void {
+  const nowEpoch = Math.floor(Date.now() / 1000);
+  const exp = parseNumericTimestamp(tokenInfo.exp);
+  if (exp !== null && exp < nowEpoch) {
+    throw new HttpError(401, "Google token is expired.");
+  }
+
+  const expiresIn = parseNumericTimestamp(tokenInfo.expires_in);
+  if (expiresIn !== null && expiresIn <= 0) {
+    throw new HttpError(401, "Google token is expired.");
+  }
+}
+
+function assertGoogleAudienceAllowed(tokenInfo: GoogleTokenInfo, env: Env): void {
+  const allowedAudiences = resolveGoogleAllowedAudiences(env);
   if (allowedAudiences.length === 0) {
     return;
   }
@@ -91,7 +124,7 @@ function assertAudienceAllowed(tokenInfo: GoogleTokenInfo, env: Env): void {
   }
 }
 
-function assertIdentityAllowed(tokenInfo: GoogleTokenInfo, env: Env): void {
+function assertGoogleIdentityAllowed(tokenInfo: GoogleTokenInfo, env: Env): void {
   const allowedEmails = parseCsv(env.GOOGLE_AUTH_ALLOWED_EMAILS).map((item) => item.toLowerCase());
   const allowedDomains = parseCsv(env.GOOGLE_AUTH_ALLOWED_DOMAINS).map((item) => item.toLowerCase());
 
@@ -124,9 +157,214 @@ function assertIdentityAllowed(tokenInfo: GoogleTokenInfo, env: Env): void {
   });
 }
 
-export async function requireGooglePublishAuth(request: Request, env: Env): Promise<AuthPrincipal> {
-  const authEnabled = toBooleanFlag(env.GOOGLE_AUTH_ENABLED, true);
-  if (!authEnabled) {
+async function fetchGoogleTokenInfo(token: string, mode: "id_token" | "access_token"): Promise<GoogleTokenInfo | null> {
+  const endpoint =
+    mode === "id_token"
+      ? `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`
+      : `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("tokeninfo_timeout"), 8000);
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      signal: controller.signal,
+      headers: { accept: "application/json" },
+    });
+
+    const payload = (await response.json().catch(() => ({}))) as GoogleTokenInfo;
+    if (!response.ok) {
+      return null;
+    }
+    return payload;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function getTokenAudiences(payload: Record<string, unknown>): string[] {
+  const audField = payload.aud;
+  if (typeof audField === "string") {
+    return [audField];
+  }
+  return collectStringArray(audField);
+}
+
+function resolveKeycloakAuthConfig(env: Env, tokenIssuer: string = ""): KeycloakAuthConfig | null {
+  if (!toBooleanFlag(env.KEYCLOAK_AUTH_ENABLED, false)) {
+    return null;
+  }
+
+  const configuredIssuer = normalizeIssuer(env.KEYCLOAK_AUTH_ISSUER ?? "");
+  const normalizedTokenIssuer = normalizeIssuer(tokenIssuer);
+  const issuer = configuredIssuer || normalizedTokenIssuer;
+  if (!issuer) {
+    return null;
+  }
+
+  const configuredUserinfoUrl = (env.KEYCLOAK_AUTH_USERINFO_URL ?? "").trim();
+  const userinfoUrl = configuredUserinfoUrl.length > 0 ? configuredUserinfoUrl : `${issuer}/protocol/openid-connect/userinfo`;
+  const requiredRole = (env.KEYCLOAK_AUTH_REQUIRED_ROLE ?? "").trim() || "mfe-registry-access";
+  const audience = (env.KEYCLOAK_AUTH_AUDIENCE ?? "").trim();
+
+  return {
+    issuer,
+    userinfoUrl,
+    requiredRole,
+    audience: audience || undefined,
+  };
+}
+
+function looksLikeKeycloakToken(payload: Record<string, unknown>, config: KeycloakAuthConfig): boolean {
+  const tokenIssuer = normalizeIssuer(String(payload.iss ?? ""));
+  if (!tokenIssuer) {
+    return false;
+  }
+
+  if (config.issuer) {
+    return tokenIssuer === config.issuer;
+  }
+
+  return tokenIssuer.includes("/realms/") || collectStringArray(payload.suncoast_roles).length > 0;
+}
+
+function assertKeycloakClaims(payload: Record<string, unknown>, config: KeycloakAuthConfig): void {
+  const tokenIssuer = normalizeIssuer(String(payload.iss ?? ""));
+  if (!tokenIssuer || tokenIssuer !== config.issuer) {
+    throw new HttpError(403, "Keycloak token issuer is not allowed.", {
+      expected_issuer: config.issuer,
+      token_issuer: tokenIssuer,
+    });
+  }
+
+  const nowEpoch = Math.floor(Date.now() / 1000);
+  const exp = parseNumericTimestamp(payload.exp);
+  if (exp !== null && exp <= nowEpoch) {
+    throw new HttpError(401, "Keycloak token is expired.");
+  }
+
+  const nbf = parseNumericTimestamp(payload.nbf);
+  if (nbf !== null && nbf > nowEpoch) {
+    throw new HttpError(401, "Keycloak token is not yet valid.");
+  }
+
+  if (config.audience) {
+    const audienceCandidates = getTokenAudiences(payload);
+    if (!audienceCandidates.includes(config.audience)) {
+      throw new HttpError(403, "Keycloak token audience is not allowed.", {
+        expected_audience: config.audience,
+        token_audiences: audienceCandidates,
+      });
+    }
+  }
+}
+
+function assertKeycloakRole(
+  payload: Record<string, unknown>,
+  userinfo: Record<string, unknown>,
+  requiredRole: string,
+): void {
+  const roles = new Set([
+    ...collectStringArray(payload.suncoast_roles),
+    ...collectStringArray(userinfo.suncoast_roles),
+  ]);
+  if (!roles.has(requiredRole)) {
+    throw new HttpError(403, "Keycloak token does not include required role.", {
+      required_role: requiredRole,
+      roles_claim: "suncoast_roles",
+    });
+  }
+}
+
+async function fetchKeycloakUserInfo(token: string, userinfoUrl: string): Promise<Record<string, unknown> | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("keycloak_userinfo_timeout"), 8000);
+  try {
+    const response = await fetch(userinfoUrl, {
+      method: "GET",
+      signal: controller.signal,
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${token}`,
+      },
+    });
+
+    const payload = (await response.json().catch(() => ({}))) as unknown;
+    if (!response.ok || !isRecord(payload)) {
+      return null;
+    }
+    return payload;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function requireGooglePublishAuthFromToken(token: string, env: Env): Promise<AuthPrincipal> {
+  const idTokenInfo = await fetchGoogleTokenInfo(token, "id_token");
+  const tokenInfo = idTokenInfo ?? (await fetchGoogleTokenInfo(token, "access_token"));
+
+  if (!tokenInfo || tokenInfo.error) {
+    throw new HttpError(401, "Google token validation failed.", tokenInfo ?? undefined);
+  }
+
+  assertTokenFresh(tokenInfo);
+  assertGoogleAudienceAllowed(tokenInfo, env);
+  assertGoogleIdentityAllowed(tokenInfo, env);
+
+  return {
+    subject: tokenInfo.sub ?? tokenInfo.email ?? tokenInfo.aud ?? "google-token",
+    email: tokenInfo.email ?? null,
+    issuer: tokenInfo.iss ?? "google",
+    audience: tokenInfo.aud ?? tokenInfo.azp ?? null,
+  };
+}
+
+async function requireKeycloakPublishAuthFromToken(token: string, env: Env): Promise<AuthPrincipal> {
+  const parsedPayload = parseJwtPayload(token);
+  const tokenIssuer = normalizeIssuer(String(parsedPayload?.iss ?? ""));
+  const keycloakConfig = resolveKeycloakAuthConfig(env, tokenIssuer);
+  if (!keycloakConfig) {
+    throw new HttpError(401, "Keycloak auth is not configured.");
+  }
+
+  const payload = parsedPayload ?? parseJwtPayload(token);
+  if (!payload) {
+    throw new HttpError(401, "Invalid Keycloak token payload.");
+  }
+
+  assertKeycloakClaims(payload, keycloakConfig);
+
+  const userinfo = await fetchKeycloakUserInfo(token, keycloakConfig.userinfoUrl);
+  if (!userinfo) {
+    throw new HttpError(401, "Keycloak token validation failed.");
+  }
+
+  assertKeycloakRole(payload, userinfo, keycloakConfig.requiredRole);
+
+  const email =
+    typeof payload.email === "string" && payload.email.length > 0
+      ? payload.email
+      : null;
+  const subject =
+    typeof payload.sub === "string" && payload.sub.length > 0
+      ? payload.sub
+      : typeof payload.preferred_username === "string" && payload.preferred_username.length > 0
+        ? payload.preferred_username
+        : "keycloak-token";
+
+  return {
+    subject,
+    email,
+    issuer: payload.iss?.toString() ?? "keycloak",
+    audience: getTokenAudiences(userinfo)[0] ?? getTokenAudiences(payload)[0] ?? null,
+  };
+}
+
+export async function requirePublishAuth(request: Request, env: Env): Promise<AuthPrincipal> {
+  const googleAuthEnabled = toBooleanFlag(env.GOOGLE_AUTH_ENABLED, true);
+  const keycloakAuthEnabled = toBooleanFlag(env.KEYCLOAK_AUTH_ENABLED, false);
+
+  if (!googleAuthEnabled && !keycloakAuthEnabled) {
     return {
       subject: "auth-disabled",
       email: null,
@@ -136,21 +374,36 @@ export async function requireGooglePublishAuth(request: Request, env: Env): Prom
   }
 
   const token = extractBearerToken(request);
-  const idTokenInfo = await fetchGoogleTokenInfo(token, "id_token");
-  const tokenInfo = idTokenInfo ?? (await fetchGoogleTokenInfo(token, "access_token"));
+  const payload = parseJwtPayload(token);
+  const tokenIssuer = normalizeIssuer(String(payload?.iss ?? ""));
+  const keycloakConfig = resolveKeycloakAuthConfig(env, tokenIssuer);
 
-  if (!tokenInfo || tokenInfo.error) {
-    throw new HttpError(401, "Google token validation failed.", tokenInfo ?? undefined);
+  if (keycloakConfig !== null && payload !== null && looksLikeKeycloakToken(payload, keycloakConfig)) {
+    return requireKeycloakPublishAuthFromToken(token, env);
   }
 
-  assertTokenFresh(tokenInfo);
-  assertAudienceAllowed(tokenInfo, env);
-  assertIdentityAllowed(tokenInfo, env);
+  if (googleAuthEnabled) {
+    return requireGooglePublishAuthFromToken(token, env);
+  }
 
-  return {
-    subject: tokenInfo.sub ?? tokenInfo.email ?? tokenInfo.aud ?? "google-token",
-    email: tokenInfo.email ?? null,
-    issuer: tokenInfo.iss ?? "google",
-    audience: tokenInfo.aud ?? tokenInfo.azp ?? null,
-  };
+  if (keycloakAuthEnabled && keycloakConfig !== null) {
+    return requireKeycloakPublishAuthFromToken(token, env);
+  }
+
+  throw new HttpError(401, "No publish auth provider is configured.");
+}
+
+export async function requireGooglePublishAuth(request: Request, env: Env): Promise<AuthPrincipal> {
+  const googleAuthEnabled = toBooleanFlag(env.GOOGLE_AUTH_ENABLED, true);
+  if (!googleAuthEnabled) {
+    return {
+      subject: "auth-disabled",
+      email: null,
+      issuer: "local",
+      audience: null,
+    };
+  }
+
+  const token = extractBearerToken(request);
+  return requireGooglePublishAuthFromToken(token, env);
 }

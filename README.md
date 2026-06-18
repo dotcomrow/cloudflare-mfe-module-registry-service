@@ -65,7 +65,7 @@ Example upsert:
 
 ```bash
 curl -X POST "https://<host>/v1/auth/apps/upsert" \
-  -H "Authorization: Bearer <google-token>" \
+  -H "Authorization: Bearer <google-or-keycloak-token>" \
   -H "Content-Type: application/json" \
   --data '{
     "slug": "internal-prod",
@@ -104,7 +104,7 @@ Example:
 
 ```bash
 curl -X POST "https://<host>/v1/modules/publish" \
-  -H "Authorization: Bearer <google-token>" \
+  -H "Authorization: Bearer <google-or-keycloak-token>" \
   -H "x-idempotency-key: <unique-key>" \
   -F "module_key=mfe-example-chat" \
   -F "module_version=v1.0.1" \
@@ -119,7 +119,7 @@ Use this when you want the same `module_key` + `module_version` available in bot
 
 ```bash
 curl -X POST "https://<host>/v1/modules/promote" \
-  -H "Authorization: Bearer <google-token>" \
+  -H "Authorization: Bearer <google-or-keycloak-token>" \
   -H "Content-Type: application/json" \
   -H "x-idempotency-key: <unique-key>" \
   --data '{
@@ -130,7 +130,7 @@ curl -X POST "https://<host>/v1/modules/promote" \
   }'
 ```
 
-## Google Auth For Publish API
+## Authentication For Publish API
 
 Publish auth is enabled by default.
 
@@ -143,6 +143,18 @@ Set these in Wrangler env vars:
 - `GOOGLE_AUTH_ALLOWED_DOMAINS` (optional comma-separated email domains)
 
 If both `GOOGLE_AUTH_ALLOWED_EMAILS` and `GOOGLE_AUTH_ALLOWED_DOMAINS` are empty, token audience validation is the main gate.
+
+### Keycloak Auth (optional)
+
+Enable Keycloak auth by setting `KEYCLOAK_AUTH_ENABLED=true`. If `KEYCLOAK_AUTH_ISSUER` is not set, the token `iss` claim is used as the issuer and `KEYCLOAK_AUTH_USERINFO_URL` defaults from it:
+
+- `KEYCLOAK_AUTH_ENABLED` (`false` by default)
+- `KEYCLOAK_AUTH_ISSUER` (optional, token `iss` fallback when omitted)
+- `KEYCLOAK_AUTH_USERINFO_URL` (optional override; defaults to `<issuer>/protocol/openid-connect/userinfo`)
+- `KEYCLOAK_AUTH_REQUIRED_ROLE` (`mfe-registry-access`)
+- `KEYCLOAK_AUTH_AUDIENCE` (optional audience check)
+
+For Keycloak access token authentication, the token must include `mfe-registry-access` in the `suncoast_roles` claim to publish/promote.
 
 For CI-only publish with a Google service account key, prefer:
 

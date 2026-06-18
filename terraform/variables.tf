@@ -260,6 +260,36 @@ variable "google_auth_allowed_domains" {
   default     = ""
 }
 
+variable "keycloak_auth_enabled" {
+  type        = string
+  description = "KEYCLOAK_AUTH_ENABLED binding value."
+  default     = "true"
+}
+
+variable "keycloak_auth_issuer" {
+  type        = string
+  description = "Optional KEYCLOAK_AUTH_ISSUER binding value. If empty, the publish token `iss` claim is used."
+  default     = ""
+}
+
+variable "keycloak_auth_userinfo_url" {
+  type        = string
+  description = "Optional KEYCLOAK_AUTH_USERINFO_URL binding value. When empty, defaults to <issuer>/protocol/openid-connect/userinfo."
+  default     = ""
+}
+
+variable "keycloak_auth_required_role" {
+  type        = string
+  description = "KEYCLOAK_AUTH_REQUIRED_ROLE binding value."
+  default     = "mfe-registry-access"
+}
+
+variable "keycloak_auth_audience" {
+  type        = string
+  description = "KEYCLOAK_AUTH_AUDIENCE binding value."
+  default     = ""
+}
+
 variable "publish_uploads_enabled" {
   type        = string
   description = "PUBLISH_UPLOADS_ENABLED binding value."
