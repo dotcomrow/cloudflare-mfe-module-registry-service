@@ -161,19 +161,19 @@ variable "enable_workers_dev_previews" {
 variable "enable_worker_observability" {
   type        = bool
   description = "Enable Cloudflare Worker observability."
-  default     = true
+  default     = false
 }
 
 variable "enable_worker_observability_logs" {
   type        = bool
   description = "Enable Worker log observability stream."
-  default     = true
+  default     = false
 }
 
 variable "enable_worker_observability_invocation_logs" {
   type        = bool
   description = "Enable Worker invocation logs."
-  default     = true
+  default     = false
 }
 
 variable "worker_observability_head_sampling_rate" {
