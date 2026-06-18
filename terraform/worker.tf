@@ -107,6 +107,11 @@ resource "cloudflare_worker_version" "app" {
     },
     {
       type = "plain_text"
+      name = "KEYCLOAK_AUTH_USERINFO_TIMEOUT_MS"
+      text = var.keycloak_auth_userinfo_timeout_ms
+    },
+    {
+      type = "plain_text"
       name = "KEYCLOAK_AUTH_REQUIRED_ROLE"
       text = var.keycloak_auth_required_role
     },

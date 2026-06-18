@@ -151,10 +151,11 @@ Enable Keycloak auth by setting `KEYCLOAK_AUTH_ENABLED=true`. If `KEYCLOAK_AUTH_
 - `KEYCLOAK_AUTH_ENABLED` (`false` by default)
 - `KEYCLOAK_AUTH_ISSUER` (optional, token `iss` fallback when omitted)
 - `KEYCLOAK_AUTH_USERINFO_URL` (optional override; defaults to `<issuer>/protocol/openid-connect/userinfo`)
+- `KEYCLOAK_AUTH_USERINFO_TIMEOUT_MS` (optional request timeout in ms for userinfo calls, default `8000`)
 - `KEYCLOAK_AUTH_REQUIRED_ROLE` (`mfe-registry-access`)
 - `KEYCLOAK_AUTH_AUDIENCE` (optional audience check)
 
-For Keycloak access token authentication, the token must include `mfe-registry-access` in the `suncoast_roles` claim to publish/promote.
+For Keycloak access token authentication, the token must include `mfe-registry-access` in `suncoast_roles`, `realm_access.roles`, or one `resource_access.*.roles` claim to publish/promote.
 
 For CI-only publish with a Google service account key, prefer:
 

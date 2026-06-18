@@ -1,5 +1,5 @@
 import type { AuthPrincipal, Env } from "./types";
-import { HttpError, isRecord, parseCsv, toBooleanFlag } from "./util";
+import { HttpError, isRecord, parseCsv, safeParseJson, toBooleanFlag } from "./util";
 
 interface GoogleTokenInfo {
   aud?: string;
@@ -18,6 +18,7 @@ interface KeycloakAuthConfig {
   userinfoUrl: string;
   requiredRole: string;
   audience?: string;
+  userinfoTimeoutMs: number;
 }
 
 function extractBearerToken(request: Request): string {
@@ -42,6 +43,20 @@ function parseNumericTimestamp(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+function parsePositiveTimeout(value: string | undefined, fallback: number): number {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.max(1000, Math.min(parsed, 60000));
 }
 
 function collectStringArray(value: unknown): string[] {
@@ -206,12 +221,14 @@ function resolveKeycloakAuthConfig(env: Env, tokenIssuer: string = ""): Keycloak
   const userinfoUrl = configuredUserinfoUrl.length > 0 ? configuredUserinfoUrl : `${issuer}/protocol/openid-connect/userinfo`;
   const requiredRole = (env.KEYCLOAK_AUTH_REQUIRED_ROLE ?? "").trim() || "mfe-registry-access";
   const audience = (env.KEYCLOAK_AUTH_AUDIENCE ?? "").trim();
+  const userinfoTimeoutMs = parsePositiveTimeout(env.KEYCLOAK_AUTH_USERINFO_TIMEOUT_MS, 8000);
 
   return {
     issuer,
     userinfoUrl,
     requiredRole,
     audience: audience || undefined,
+    userinfoTimeoutMs,
   };
 }
 
@@ -266,37 +283,118 @@ function assertKeycloakRole(
 ): void {
   const roles = new Set([
     ...collectStringArray(payload.suncoast_roles),
-    ...collectStringArray(userinfo.suncoast_roles),
+    ...collectKeycloakRoleClaims(payload),
+    ...collectKeycloakRoleClaims(userinfo),
   ]);
   if (!roles.has(requiredRole)) {
     throw new HttpError(403, "Keycloak token does not include required role.", {
       required_role: requiredRole,
-      roles_claim: "suncoast_roles",
+      roles_claims: ["suncoast_roles", "realm_access.roles", "resource_access.*.roles"],
     });
   }
 }
 
-async function fetchKeycloakUserInfo(token: string, userinfoUrl: string): Promise<Record<string, unknown> | null> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("keycloak_userinfo_timeout"), 8000);
-  try {
-    const response = await fetch(userinfoUrl, {
-      method: "GET",
-      signal: controller.signal,
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${token}`,
-      },
-    });
+function collectKeycloakRoleClaims(payload: Record<string, unknown>): string[] {
+  const roles = new Set<string>(collectStringArray(payload.suncoast_roles));
 
-    const payload = (await response.json().catch(() => ({}))) as unknown;
-    if (!response.ok || !isRecord(payload)) {
-      return null;
-    }
-    return payload;
-  } finally {
-    clearTimeout(timeout);
+  const realmAccess = payload.realm_access;
+  if (isRecord(realmAccess)) {
+    collectStringArray(realmAccess.roles).forEach((role) => roles.add(role));
   }
+
+  const resourceAccess = payload.resource_access;
+  if (isRecord(resourceAccess)) {
+    for (const entry of Object.values(resourceAccess)) {
+      if (!isRecord(entry)) {
+        continue;
+      }
+      collectStringArray(entry.roles).forEach((role) => roles.add(role));
+    }
+  }
+
+  return [...roles];
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function fetchKeycloakUserInfo(token: string, userinfoUrl: string, timeoutMs: number): Promise<Record<string, unknown> | null> {
+  const maxAttempts = 2;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(userinfoUrl, {
+        method: "GET",
+        signal: controller.signal,
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${token}`,
+        },
+      });
+
+      const payloadText = await response.text().catch(() => "");
+      if (!response.ok) {
+        throw new HttpError(401, "Keycloak userinfo validation failed.", {
+          userinfo_url: userinfoUrl,
+          status: response.status,
+          status_text: response.statusText,
+          body: payloadText,
+        });
+      }
+
+      const payload = safeParseJson(payloadText, {});
+      if (!isRecord(payload)) {
+        throw new HttpError(401, "Keycloak userinfo response was invalid.", {
+          userinfo_url: userinfoUrl,
+          body: payloadText,
+        });
+      }
+      return payload;
+    } catch (error: unknown) {
+      lastError = error;
+      if (error instanceof HttpError) {
+        throw error;
+      }
+
+      const name = error instanceof Error ? error.name : "";
+      const message = error instanceof Error ? error.message : "unknown_error";
+      const timedOut =
+        name === "AbortError" ||
+        message === "keycloak_userinfo_timeout" ||
+        message.includes("aborted");
+
+      if (timedOut && attempt < maxAttempts) {
+        await sleep(250 * attempt);
+        continue;
+      }
+
+      throw new HttpError(
+        401,
+        timedOut ? "Keycloak userinfo request timed out." : "Keycloak userinfo request failed.",
+        {
+          userinfo_url: userinfoUrl,
+          attempts: attempt,
+          timeout_ms: timeoutMs,
+          error_name: name,
+          error: message,
+        },
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw new HttpError(401, "Keycloak userinfo request failed.", {
+    userinfo_url: userinfoUrl,
+    attempts: maxAttempts,
+    cause: (lastError as Error | null)?.message ?? "unknown_error",
+  });
 }
 
 async function requireGooglePublishAuthFromToken(token: string, env: Env): Promise<AuthPrincipal> {
@@ -334,10 +432,7 @@ async function requireKeycloakPublishAuthFromToken(token: string, env: Env): Pro
 
   assertKeycloakClaims(payload, keycloakConfig);
 
-  const userinfo = await fetchKeycloakUserInfo(token, keycloakConfig.userinfoUrl);
-  if (!userinfo) {
-    throw new HttpError(401, "Keycloak token validation failed.");
-  }
+  const userinfo = await fetchKeycloakUserInfo(token, keycloakConfig.userinfoUrl, keycloakConfig.userinfoTimeoutMs);
 
   assertKeycloakRole(payload, userinfo, keycloakConfig.requiredRole);
 
