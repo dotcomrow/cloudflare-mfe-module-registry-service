@@ -221,7 +221,7 @@ function resolveKeycloakAuthConfig(env: Env, tokenIssuer: string = ""): Keycloak
   const userinfoUrl = configuredUserinfoUrl.length > 0 ? configuredUserinfoUrl : `${issuer}/protocol/openid-connect/userinfo`;
   const requiredRole = (env.KEYCLOAK_AUTH_REQUIRED_ROLE ?? "").trim() || "mfe-registry-access";
   const audience = (env.KEYCLOAK_AUTH_AUDIENCE ?? "").trim();
-  const userinfoTimeoutMs = parsePositiveTimeout(env.KEYCLOAK_AUTH_USERINFO_TIMEOUT_MS, 8000);
+  const userinfoTimeoutMs = parsePositiveTimeout(env.KEYCLOAK_AUTH_USERINFO_TIMEOUT_MS, 30000);
 
   return {
     issuer,
@@ -321,22 +321,58 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+function buildUserinfoHeaders(token: string): HeadersInit {
+  return {
+    accept: "application/json",
+    Authorization: `Bearer ${token}`,
+  };
+}
+
+function isAbortError(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : "";
+  return name === "AbortError" || message === "The operation was aborted" || message.includes("aborted");
+}
+
+function makeUserinfoRequest(
+  token: string,
+  method: "GET" | "POST",
+): RequestInit {
+  if (method === "POST") {
+    const body = new URLSearchParams({ access_token: token });
+    return {
+      method,
+      headers: {
+        ...buildUserinfoHeaders(token),
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    };
+  }
+
+  return {
+    method,
+    headers: buildUserinfoHeaders(token),
+  };
+}
+
 async function fetchKeycloakUserInfo(token: string, userinfoUrl: string, timeoutMs: number): Promise<Record<string, unknown> | null> {
   const maxAttempts = 2;
   let lastError: unknown = null;
+  const methods: Array<"GET" | "POST"> = ["GET", "POST"];
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const method = methods[attempt - 1];
     try {
-      const response = await fetch(userinfoUrl, {
-        method: "GET",
-        signal: controller.signal,
-        headers: {
-          accept: "application/json",
-          authorization: `Bearer ${token}`,
+      const response = await fetch(
+        userinfoUrl,
+        {
+          ...makeUserinfoRequest(token, method),
+          signal: controller.signal,
         },
-      });
+      );
 
       const payloadText = await response.text().catch(() => "");
       if (!response.ok) {
@@ -364,10 +400,7 @@ async function fetchKeycloakUserInfo(token: string, userinfoUrl: string, timeout
 
       const name = error instanceof Error ? error.name : "";
       const message = error instanceof Error ? error.message : "unknown_error";
-      const timedOut =
-        name === "AbortError" ||
-        message === "keycloak_userinfo_timeout" ||
-        message.includes("aborted");
+      const timedOut = isAbortError(error);
 
       if (timedOut && attempt < maxAttempts) {
         await sleep(250 * attempt);
@@ -381,6 +414,7 @@ async function fetchKeycloakUserInfo(token: string, userinfoUrl: string, timeout
           userinfo_url: userinfoUrl,
           attempts: attempt,
           timeout_ms: timeoutMs,
+          request_method: method,
           error_name: name,
           error: message,
         },

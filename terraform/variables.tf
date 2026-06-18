@@ -281,7 +281,7 @@ variable "keycloak_auth_userinfo_url" {
 variable "keycloak_auth_userinfo_timeout_ms" {
   type        = string
   description = "Optional KEYCLOAK_AUTH_USERINFO_TIMEOUT_MS binding value for userinfo request timeout."
-  default     = "8000"
+  default     = "30000"
 }
 
 variable "keycloak_auth_required_role" {
