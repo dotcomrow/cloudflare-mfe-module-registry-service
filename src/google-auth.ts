@@ -579,3 +579,18 @@ export async function requireGooglePublishAuth(request: Request, env: Env): Prom
   const token = extractBearerToken(request);
   return requireGooglePublishAuthFromToken(token, env);
 }
+
+export async function requireKeycloakPublishAuth(request: Request, env: Env): Promise<AuthPrincipal> {
+  const keycloakAuthEnabled = toBooleanFlag(env.KEYCLOAK_AUTH_ENABLED, false);
+  if (!keycloakAuthEnabled) {
+    return {
+      subject: "auth-disabled",
+      email: null,
+      issuer: "local",
+      audience: null,
+    };
+  }
+
+  const token = extractBearerToken(request);
+  return requireKeycloakPublishAuthFromToken(token, env);
+}

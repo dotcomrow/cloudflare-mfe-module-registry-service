@@ -1,4 +1,8 @@
-import { requirePublishAuth } from "./google-auth";
+import {
+  requireGooglePublishAuth,
+  requireKeycloakPublishAuth,
+  requirePublishAuth,
+} from "./google-auth";
 import {
   getAuthGatewayApp,
   getModuleDetails,
@@ -699,7 +703,7 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   }
 
   if (request.method === "POST" && pathname === "/v1/modules/publish") {
-    const principal = await requirePublishAuth(request, env);
+    const principal = await requireGooglePublishAuth(request, env);
     const { payload, requestBodyText, manifestDocument } = await parsePublishRequest(request, env);
     const idempotencyKey = request.headers.get("x-idempotency-key");
     const strictValidation = toBooleanFlag(env.PUBLISH_VALIDATION_STRICT, true);
@@ -725,7 +729,7 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   }
 
   if (request.method === "POST" && pathname === "/v1/modules/promote") {
-    const principal = await requirePublishAuth(request, env);
+    const principal = await requireKeycloakPublishAuth(request, env);
     const payload = await parsePromoteRequest(request);
     const idempotencyKey = request.headers.get("x-idempotency-key");
     const strictValidation = toBooleanFlag(env.PUBLISH_VALIDATION_STRICT, true);
