@@ -546,8 +546,17 @@ export function renderIndexHtml(serviceTitle: string): string {
 
         var versions = Array.isArray(data.versions) ? data.versions : [];
         var versionRows = "";
+        var prodVersions = {};
         for (var i = 0; i < versions.length; i += 1) {
           var version = versions[i] || {};
+          var versionChannel = String(version.channel || "").toLowerCase();
+          if (versionChannel === "prod" && typeof version.module_version === "string" && version.module_version.length > 0) {
+            prodVersions[version.module_version] = true;
+          }
+        }
+
+        for (var j = 0; j < versions.length; j += 1) {
+          var version = versions[j] || {};
           var links =
             '<a href="' + escapeUnsafe(version.bundle_url || "#") + '" target="_blank" rel="noopener noreferrer">bundle</a>' +
             '<a href="' + escapeUnsafe(version.manifest_url || "#") + '" target="_blank" rel="noopener noreferrer">manifest</a>';
@@ -561,7 +570,12 @@ export function renderIndexHtml(serviceTitle: string): string {
 
           var sourceChannel = String(version.channel || "").toLowerCase();
           var targetChannel = sourceChannel === "preview" ? "prod" : (sourceChannel === "prod" ? "preview" : "");
-          var canPromote = targetChannel === "preview" || targetChannel === "prod";
+          var isPromotedToProd =
+            sourceChannel === "preview" &&
+            typeof version.module_version === "string" &&
+            prodVersions[version.module_version] === true;
+
+          var canPromote = targetChannel === "preview" || (targetChannel === "prod" && !isPromotedToProd);
           if (canPromote) {
             links +=
               '<button type="button" class="promote-btn" data-promote-module="' + escapeUnsafe(module.module_key || state.selectedKey || "") +

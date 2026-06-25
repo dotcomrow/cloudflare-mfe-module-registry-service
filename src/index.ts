@@ -1,4 +1,8 @@
-import { requireGooglePublishAuth } from "./google-auth";
+import {
+  requireGooglePublishAuth,
+  requireKeycloakPublishAuth,
+  requirePublishAuth,
+} from "./google-auth";
 import {
   getAuthGatewayApp,
   getModuleDetails,
@@ -672,7 +676,7 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   }
 
   if (request.method === "POST" && pathname === "/v1/auth/apps/upsert") {
-    const principal = await requireGooglePublishAuth(request, env);
+    const principal = await requirePublishAuth(request, env);
     const bodyText = await request.text();
     if (bodyText.length > MAX_JSON_PUBLISH_BODY_BYTES) {
       throw new HttpError(413, "Auth app payload too large.");
@@ -725,7 +729,7 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   }
 
   if (request.method === "POST" && pathname === "/v1/modules/promote") {
-    const principal = await requireGooglePublishAuth(request, env);
+    const principal = await requireKeycloakPublishAuth(request, env);
     const payload = await parsePromoteRequest(request);
     const idempotencyKey = request.headers.get("x-idempotency-key");
     const strictValidation = toBooleanFlag(env.PUBLISH_VALIDATION_STRICT, true);

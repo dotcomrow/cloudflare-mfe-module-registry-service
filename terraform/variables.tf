@@ -161,19 +161,19 @@ variable "enable_workers_dev_previews" {
 variable "enable_worker_observability" {
   type        = bool
   description = "Enable Cloudflare Worker observability."
-  default     = true
+  default     = false
 }
 
 variable "enable_worker_observability_logs" {
   type        = bool
   description = "Enable Worker log observability stream."
-  default     = true
+  default     = false
 }
 
 variable "enable_worker_observability_invocation_logs" {
   type        = bool
   description = "Enable Worker invocation logs."
-  default     = true
+  default     = false
 }
 
 variable "worker_observability_head_sampling_rate" {
@@ -257,6 +257,42 @@ variable "google_auth_allowed_emails" {
 variable "google_auth_allowed_domains" {
   type        = string
   description = "GOOGLE_AUTH_ALLOWED_DOMAINS binding value."
+  default     = ""
+}
+
+variable "keycloak_auth_enabled" {
+  type        = string
+  description = "KEYCLOAK_AUTH_ENABLED binding value."
+  default     = "true"
+}
+
+variable "keycloak_auth_issuer" {
+  type        = string
+  description = "Optional KEYCLOAK_AUTH_ISSUER binding value. If empty, the publish token `iss` claim is used."
+  default     = ""
+}
+
+variable "keycloak_auth_userinfo_url" {
+  type        = string
+  description = "Optional KEYCLOAK_AUTH_USERINFO_URL binding value. When empty, defaults to <issuer>/protocol/openid-connect/userinfo."
+  default     = "https://auth-origin.suncoast.systems/realms/internal/protocol/openid-connect/userinfo"
+}
+
+variable "keycloak_auth_userinfo_timeout_ms" {
+  type        = string
+  description = "Optional KEYCLOAK_AUTH_USERINFO_TIMEOUT_MS binding value for userinfo request timeout."
+  default     = "30000"
+}
+
+variable "keycloak_auth_required_role" {
+  type        = string
+  description = "KEYCLOAK_AUTH_REQUIRED_ROLE binding value."
+  default     = "mfe-registry-access"
+}
+
+variable "keycloak_auth_audience" {
+  type        = string
+  description = "KEYCLOAK_AUTH_AUDIENCE binding value."
   default     = ""
 }
 

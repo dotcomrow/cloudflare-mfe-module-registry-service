@@ -92,6 +92,36 @@ resource "cloudflare_worker_version" "app" {
     },
     {
       type = "plain_text"
+      name = "KEYCLOAK_AUTH_ENABLED"
+      text = var.keycloak_auth_enabled
+    },
+    {
+      type = "plain_text"
+      name = "KEYCLOAK_AUTH_ISSUER"
+      text = var.keycloak_auth_issuer
+    },
+    {
+      type = "plain_text"
+      name = "KEYCLOAK_AUTH_USERINFO_URL"
+      text = var.keycloak_auth_userinfo_url
+    },
+    {
+      type = "plain_text"
+      name = "KEYCLOAK_AUTH_USERINFO_TIMEOUT_MS"
+      text = var.keycloak_auth_userinfo_timeout_ms
+    },
+    {
+      type = "plain_text"
+      name = "KEYCLOAK_AUTH_REQUIRED_ROLE"
+      text = var.keycloak_auth_required_role
+    },
+    {
+      type = "plain_text"
+      name = "KEYCLOAK_AUTH_AUDIENCE"
+      text = var.keycloak_auth_audience
+    },
+    {
+      type = "plain_text"
       name = "PUBLISH_UPLOADS_ENABLED"
       text = var.publish_uploads_enabled
     },
