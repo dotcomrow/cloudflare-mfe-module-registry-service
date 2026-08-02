@@ -9,8 +9,6 @@ on:
       - prod
     types:
       - completed
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -20,6 +18,7 @@ permissions:
 jobs:
   retry-until-success:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
