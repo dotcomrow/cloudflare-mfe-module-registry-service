@@ -40,8 +40,26 @@ jobs:
           BRANCH: ${{ matrix.branch }}
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          TARGET_WORKFLOW_NAME: "Terraform Deploy"
+          TARGET_WORKFLOW_FILE: "terraform-deploy.yml"
+          MAX_RETRY_ATTEMPTS: ${{ vars.TERRAFORM_AUTO_RETRY_MAX_ATTEMPTS || 10 }}
         run: |
           set -euo pipefail
+
+          sanitize_positive_int() {
+            local raw="$1"
+            local default_value="$2"
+            if [[ "${raw}" =~ ^[1-9][0-9]*$ ]]; then
+              printf '%s' "${raw}"
+              return 0
+            fi
+            printf '%s' "${default_value}"
+          }
+
+          MAX_RETRY_ATTEMPTS="$(sanitize_positive_int "${MAX_RETRY_ATTEMPTS:-10}" "10")"
+          echo "Configured max retry attempts: ${MAX_RETRY_ATTEMPTS}"
 
           should_monitor_branch() {
             if [ "${EVENT_NAME}" != "workflow_run" ]; then
@@ -63,38 +81,166 @@ jobs:
 
           latest_run_json() {
             gh run list -R "${OWNER}/${REPO}" \
-              --workflow "Terraform Deploy" \
+              --workflow "${TARGET_WORKFLOW_NAME}" \
               --branch "${BRANCH}" \
               --limit 1 \
-              --json databaseId,status,conclusion,createdAt,url,event || echo "[]"
+              --json databaseId,status,conclusion,createdAt,url,event,headSha || echo "[]"
+          }
+
+          recent_runs_json() {
+            gh run list -R "${OWNER}/${REPO}" \
+              --workflow "${TARGET_WORKFLOW_NAME}" \
+              --branch "${BRANCH}" \
+              --limit 100 \
+              --json databaseId,status,conclusion,createdAt,url,event,headSha || echo "[]"
+          }
+
+          run_status_json() {
+            local run_id="$1"
+            gh run view -R "${OWNER}/${REPO}" "${run_id}" --json databaseId,status,conclusion,createdAt,url,headBranch,headSha || echo "{}"
           }
 
           dispatch_branch() {
-            echo "Dispatching Terraform Deploy on branch '${BRANCH}'."
-            gh api --method POST "/repos/${OWNER}/${REPO}/actions/workflows/terraform-deploy.yml/dispatches" -f ref="${BRANCH}" >/dev/null
+            echo "Dispatching ${TARGET_WORKFLOW_NAME} on branch '${BRANCH}'."
+            gh api --method POST "/repos/${OWNER}/${REPO}/actions/workflows/${TARGET_WORKFLOW_FILE}/dispatches" -f ref="${BRANCH}" >/dev/null
+          }
+
+          is_retryable_conclusion() {
+            case "$1" in
+              failure|cancelled|timed_out|startup_failure)
+                return 0
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
+          retryable_failure_count_for_sha() {
+            local head_sha="$1"
+            if [ -z "${head_sha}" ] || [ "${head_sha}" = "null" ]; then
+              printf '0'
+              return 0
+            fi
+
+            recent_runs_json | jq --arg head_sha "${head_sha}" \
+              '[.[] | select(
+                .headSha == $head_sha
+                and .status == "completed"
+                and (
+                  .conclusion == "failure"
+                  or .conclusion == "cancelled"
+                  or .conclusion == "timed_out"
+                  or .conclusion == "startup_failure"
+                )
+              )] | length'
+          }
+
+          dispatch_branch_with_limit() {
+            local source_run_id="${1:-}"
+            local source_head_sha="${2:-}"
+            local retryable_failure_count="0"
+
+            if [ -n "${source_head_sha}" ] && [ "${source_head_sha}" != "null" ]; then
+              retryable_failure_count="$(retryable_failure_count_for_sha "${source_head_sha}")"
+              if [ "${retryable_failure_count}" -gt "${MAX_RETRY_ATTEMPTS}" ]; then
+                local failed_retries=$((retryable_failure_count - 1))
+                echo "Observed ${retryable_failure_count} retryable failed ${TARGET_WORKFLOW_NAME} runs for ${source_head_sha} on '${BRANCH}'."
+                echo "At least ${failed_retries} retry attempts have already failed; stopping retries."
+                return 1
+              fi
+            fi
+
+            retry_attempt=$((retry_attempt + 1))
+            if [ "${retry_attempt}" -gt "${MAX_RETRY_ATTEMPTS}" ]; then
+              echo "Reached retry attempt limit (${MAX_RETRY_ATTEMPTS}) for branch '${BRANCH}'. Stopping retries."
+              return 1
+            fi
+
+            if [ -n "${source_run_id}" ]; then
+              echo "Dispatching retry attempt ${retry_attempt}/${MAX_RETRY_ATTEMPTS} after run ${source_run_id} on '${BRANCH}'."
+            else
+              echo "Dispatching retry attempt ${retry_attempt}/${MAX_RETRY_ATTEMPTS} on '${BRANCH}'."
+            fi
+            dispatch_branch
+          }
+
+          wait_for_new_run_id() {
+            local previous_run_id="$1"
+            local wait_count=0
+            NEW_RUN_ID=""
+
+            while true; do
+              sleep 15
+
+              local latest_json
+              latest_json="$(latest_run_json)"
+              if [ -n "${latest_json}" ] && [ "$(echo "${latest_json}" | jq 'length')" -gt 0 ]; then
+                local latest_run_id
+                latest_run_id="$(echo "${latest_json}" | jq -r '.[0].databaseId')"
+
+                if [ -n "${latest_run_id}" ] && [ "${latest_run_id}" != "null" ] && [ "${latest_run_id}" != "${previous_run_id}" ]; then
+                  echo "Detected new ${TARGET_WORKFLOW_NAME} run ${latest_run_id} on '${BRANCH}'."
+                  NEW_RUN_ID="${latest_run_id}"
+                  return 0
+                fi
+              fi
+
+              wait_count=$((wait_count + 1))
+              if [ "${wait_count}" -ge 40 ]; then
+                echo "Dispatched run not visible yet on '${BRANCH}'. Re-dispatching."
+                if ! dispatch_branch_with_limit "${previous_run_id}" "${ACTIVE_HEAD_SHA:-}"; then
+                  return 1
+                fi
+                wait_count=0
+              fi
+            done
           }
 
           monitor_branch_until_success() {
-            local latest_json
-            local run_id
+            local active_run_id="${WORKFLOW_RUN_ID:-}"
+            ACTIVE_HEAD_SHA="${WORKFLOW_RUN_SHA:-}"
+            local run_json
             local latest_status
             local run_conclusion
-            local previous_failed_run_id=""
-            local wait_count=0
+            local retry_attempt=0
+
+            local bootstrap_json
+            bootstrap_json="$(latest_run_json)"
+            if [ -n "${bootstrap_json}" ] && [ "$(echo "${bootstrap_json}" | jq 'length')" -gt 0 ]; then
+              local latest_run_id
+              latest_run_id="$(echo "${bootstrap_json}" | jq -r '.[0].databaseId')"
+              if [ -z "${active_run_id}" ] || [ "${active_run_id}" != "${latest_run_id}" ]; then
+                if [ -n "${active_run_id}" ]; then
+                  echo "Run ${active_run_id} is no longer the latest ${TARGET_WORKFLOW_NAME} run on '${BRANCH}'; monitoring latest run ${latest_run_id}."
+                fi
+                active_run_id="${latest_run_id}"
+                ACTIVE_HEAD_SHA="$(echo "${bootstrap_json}" | jq -r '.[0].headSha // ""')"
+              fi
+            elif [ -z "${active_run_id}" ]; then
+              echo "No ${TARGET_WORKFLOW_NAME} runs found for '${BRANCH}'. Nothing to retry."
+              return 0
+            fi
 
             while true; do
-              latest_json="$(latest_run_json)"
-              if [ -z "${latest_json}" ] || [ "$(echo "${latest_json}" | jq 'length')" -eq 0 ]; then
-                echo "No Terraform Deploy runs found for '${BRANCH}'. Waiting 20s."
-                sleep 20
+              run_json="$(run_status_json "${active_run_id}")"
+              if [ -z "${run_json}" ] || [ "${run_json}" = "{}" ]; then
+                echo "Run ${active_run_id} no longer available. Falling back to latest for '${BRANCH}'."
+                bootstrap_json="$(latest_run_json)"
+                if [ -z "${bootstrap_json}" ] || [ "$(echo "${bootstrap_json}" | jq 'length')" -eq 0 ]; then
+                  echo "No ${TARGET_WORKFLOW_NAME} runs found for '${BRANCH}'. Nothing to retry."
+                  return 0
+                fi
+                active_run_id="$(echo "${bootstrap_json}" | jq -r '.[0].databaseId')"
+                ACTIVE_HEAD_SHA="$(echo "${bootstrap_json}" | jq -r '.[0].headSha // ""')"
                 continue
               fi
 
-              run_id="$(echo "${latest_json}" | jq -r '.[0].databaseId')"
-              latest_status="$(echo "${latest_json}" | jq -r '.[0].status')"
-              run_conclusion="$(echo "${latest_json}" | jq -r '.[0].conclusion // ""')"
+              latest_status="$(echo "${run_json}" | jq -r '.status')"
+              run_conclusion="$(echo "${run_json}" | jq -r '.conclusion // ""')"
+              ACTIVE_HEAD_SHA="$(echo "${run_json}" | jq -r '.headSha // ""')"
 
-              echo "Branch '${BRANCH}' latest run=${run_id} status=${latest_status} conclusion=${run_conclusion}"
+              echo "Branch '${BRANCH}' active run=${active_run_id} status=${latest_status} conclusion=${run_conclusion}"
 
               if [ "${latest_status}" = "in_progress" ] || [ "${latest_status}" = "queued" ]; then
                 sleep 20
@@ -102,45 +248,25 @@ jobs:
               fi
 
               if [ "${run_conclusion}" = "success" ]; then
-                echo "Branch '${BRANCH}' latest run succeeded. Retry loop complete."
+                echo "Run ${active_run_id} succeeded. Retry loop complete."
                 return 0
               fi
 
-              if [ "${run_conclusion}" = "failure" ] || [ "${run_conclusion}" = "cancelled" ] || [ "${run_conclusion}" = "timed_out" ] || [ "${run_conclusion}" = "startup_failure" ]; then
-                if [ "${previous_failed_run_id}" = "${run_id}" ]; then
-                  sleep 20
-                  continue
+              if is_retryable_conclusion "${run_conclusion}"; then
+                if ! dispatch_branch_with_limit "${active_run_id}" "${ACTIVE_HEAD_SHA}"; then
+                  return 1
                 fi
 
-                previous_failed_run_id="${run_id}"
-                dispatch_branch
-                wait_count=0
+                if ! wait_for_new_run_id "${active_run_id}"; then
+                  return 1
+                fi
 
-                while true; do
-                  sleep 15
-                  latest_json="$(latest_run_json)"
-                  if [ -z "${latest_json}" ] || [ "$(echo "${latest_json}" | jq 'length')" -eq 0 ]; then
-                    continue
-                  fi
-
-                  run_id="$(echo "${latest_json}" | jq -r '.[0].databaseId')"
-                  if [ "${run_id}" != "${previous_failed_run_id}" ]; then
-                    echo "Detected new Terraform Deploy run ${run_id} on '${BRANCH}'."
-                    break
-                  fi
-
-                  wait_count=$((wait_count + 1))
-                  if [ "${wait_count}" -ge 40 ]; then
-                    echo "Dispatched run not visible yet on '${BRANCH}'. Re-dispatching."
-                    dispatch_branch
-                    wait_count=0
-                  fi
-                done
+                active_run_id="${NEW_RUN_ID}"
                 continue
               fi
 
-              echo "Branch '${BRANCH}' has non-retryable conclusion '${run_conclusion}'. Waiting 20s."
-              sleep 20
+              echo "Branch '${BRANCH}' has non-retryable conclusion '${run_conclusion}'. Nothing to retry."
+              return 0
             done
           }
 
