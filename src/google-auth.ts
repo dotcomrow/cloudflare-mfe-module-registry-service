@@ -361,7 +361,7 @@ function makeUserinfoRequest(
   };
 }
 
-async function fetchKeycloakUserInfo(token: string, userinfoUrls: string[], timeoutMs: number): Promise<Record<string, unknown> | null> {
+async function fetchKeycloakUserInfo(token: string, userinfoUrls: string[], timeoutMs: number): Promise<Record<string, unknown>> {
   const maxAttempts = 2;
   let lastError: unknown = null;
   const methods: Array<"GET" | "POST"> = ["GET", "POST"];

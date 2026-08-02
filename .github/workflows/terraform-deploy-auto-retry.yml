@@ -1,15 +1,16 @@
 name: Terraform Deploy Auto Retry
 
 on:
-  workflow_run:
-    workflows:
-      - Terraform Deploy
-    branches:
-      - dev
-      - prod
-    types:
-      - completed
   workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Terraform Deploy run id that failed and triggered this retry monitor.
+        required: false
+        type: string
+      source_sha:
+        description: Commit SHA from the failed Terraform Deploy run.
+        required: false
+        type: string
 
 permissions:
   actions: write
@@ -19,15 +20,10 @@ jobs:
   retry-until-success:
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        branch:
-          - dev
-          - prod
+    if: ${{ github.ref_name == 'dev' || github.ref_name == 'prod' }}
     concurrency:
-      group: terraform-deploy-auto-retry-${{ matrix.branch }}
-      cancel-in-progress: false
+      group: terraform-deploy-auto-retry-${{ github.ref_name }}
+      cancel-in-progress: true
 
     steps:
       - name: Retry failed Terraform deploys until successful
@@ -35,12 +31,9 @@ jobs:
           GH_TOKEN: ${{ secrets.ACTIONS_BOT_TOKEN || github.token }}
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.event.repository.name }}
-          EVENT_NAME: ${{ github.event_name }}
-          BRANCH: ${{ matrix.branch }}
-          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
-          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          BRANCH: ${{ github.ref_name }}
+          SOURCE_RUN_ID: ${{ github.event.inputs.source_run_id }}
+          SOURCE_RUN_SHA: ${{ github.event.inputs.source_sha }}
           TARGET_WORKFLOW_NAME: "Terraform Deploy"
           TARGET_WORKFLOW_FILE: "terraform-deploy.yml"
           MAX_RETRY_ATTEMPTS: ${{ vars.TERRAFORM_AUTO_RETRY_MAX_ATTEMPTS || 10 }}
@@ -59,24 +52,6 @@ jobs:
 
           MAX_RETRY_ATTEMPTS="$(sanitize_positive_int "${MAX_RETRY_ATTEMPTS:-10}" "10")"
           echo "Configured max retry attempts: ${MAX_RETRY_ATTEMPTS}"
-
-          should_monitor_branch() {
-            if [ "${EVENT_NAME}" != "workflow_run" ]; then
-              return 0
-            fi
-
-            if [ "${WORKFLOW_RUN_BRANCH}" != "${BRANCH}" ]; then
-              echo "workflow_run was for '${WORKFLOW_RUN_BRANCH}', this job is '${BRANCH}'. Skipping."
-              return 1
-            fi
-
-            if [ "${WORKFLOW_RUN_CONCLUSION}" != "failure" ]; then
-              echo "workflow_run conclusion for '${BRANCH}' was '${WORKFLOW_RUN_CONCLUSION}'. Nothing to retry."
-              return 1
-            fi
-
-            return 0
-          }
 
           latest_run_json() {
             gh run list -R "${OWNER}/${REPO}" \
@@ -100,8 +75,16 @@ jobs:
           }
 
           dispatch_branch() {
+            local source_run_id="${1:-}"
             echo "Dispatching ${TARGET_WORKFLOW_NAME} on branch '${BRANCH}'."
-            gh api --method POST "/repos/${OWNER}/${REPO}/actions/workflows/${TARGET_WORKFLOW_FILE}/dispatches" -f ref="${BRANCH}" >/dev/null
+            if [ -n "${source_run_id}" ]; then
+              gh api --method POST "/repos/${OWNER}/${REPO}/actions/workflows/${TARGET_WORKFLOW_FILE}/dispatches" \
+                -f ref="${BRANCH}" \
+                -f "inputs[retry_source_run_id]=${source_run_id}" >/dev/null
+            else
+              gh api --method POST "/repos/${OWNER}/${REPO}/actions/workflows/${TARGET_WORKFLOW_FILE}/dispatches" \
+                -f ref="${BRANCH}" >/dev/null
+            fi
           }
 
           is_retryable_conclusion() {
@@ -161,7 +144,7 @@ jobs:
             else
               echo "Dispatching retry attempt ${retry_attempt}/${MAX_RETRY_ATTEMPTS} on '${BRANCH}'."
             fi
-            dispatch_branch
+            dispatch_branch "${source_run_id}"
           }
 
           wait_for_new_run_id() {
@@ -197,8 +180,8 @@ jobs:
           }
 
           monitor_branch_until_success() {
-            local active_run_id="${WORKFLOW_RUN_ID:-}"
-            ACTIVE_HEAD_SHA="${WORKFLOW_RUN_SHA:-}"
+            local active_run_id="${SOURCE_RUN_ID:-}"
+            ACTIVE_HEAD_SHA="${SOURCE_RUN_SHA:-}"
             local run_json
             local latest_status
             local run_conclusion
@@ -269,9 +252,5 @@ jobs:
             done
           }
 
-          if ! should_monitor_branch; then
-            exit 0
-          fi
-
-          echo "Starting retry monitor for branch '${BRANCH}' (event=${EVENT_NAME})."
+          echo "Starting retry monitor for branch '${BRANCH}'."
           monitor_branch_until_success
