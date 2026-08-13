@@ -656,7 +656,21 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
 
     if (parts.length === 3) {
       const moduleKey = parsePathSegment(parts[2]);
-      const result = await getModuleDetails(env.REGISTRY_DB, moduleKey);
+      const hasVersionPagination =
+        url.searchParams.has("versions_limit") ||
+        url.searchParams.has("versions_offset") ||
+        url.searchParams.has("limit") ||
+        url.searchParams.has("offset");
+      const versionsLimit = hasVersionPagination
+        ? parseIntegerParam(url.searchParams.get("versions_limit") ?? url.searchParams.get("limit"), 100, 1, 500)
+        : undefined;
+      const versionsOffset = hasVersionPagination
+        ? parseIntegerParam(url.searchParams.get("versions_offset") ?? url.searchParams.get("offset"), 0, 0, 50000)
+        : undefined;
+      const result = await getModuleDetails(env.REGISTRY_DB, moduleKey, {
+        versionsLimit,
+        versionsOffset,
+      });
       return jsonResponse(result, 200, API_HEADERS);
     }
 

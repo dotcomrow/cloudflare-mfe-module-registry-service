@@ -6,6 +6,11 @@ on:
       - dev
       - prod
   workflow_dispatch:
+    inputs:
+      retry_source_run_id:
+        description: Internal marker used when Terraform Deploy is dispatched by the auto-retry workflow.
+        required: false
+        type: string
 
 permissions: write-all
 
@@ -105,3 +110,26 @@ jobs:
           workspace: ${{ steps.target.outputs.workspace }}
           configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
           plan_only: false
+
+  dispatch-auto-retry:
+    name: Dispatch auto retry
+    needs: deploy
+    if: ${{ always() && needs.deploy.result == 'failure' && (github.ref_name == 'dev' || github.ref_name == 'prod') && (github.event_name != 'workflow_dispatch' || github.event.inputs.retry_source_run_id == '' || github.event.inputs.retry_source_run_id == null) }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Dispatch Terraform Deploy Auto Retry
+        env:
+          GH_TOKEN: ${{ secrets.ACTIONS_BOT_TOKEN || github.token }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          BRANCH: ${{ github.ref_name }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "Dispatching Terraform Deploy Auto Retry for failed run ${SOURCE_RUN_ID} on '${BRANCH}'."
+          gh api --method POST "/repos/${OWNER}/${REPO}/actions/workflows/terraform-deploy-auto-retry.yml/dispatches" \
+            -f ref="${BRANCH}" \
+            -f "inputs[source_run_id]=${SOURCE_RUN_ID}" \
+            -f "inputs[source_sha]=${SOURCE_SHA}" >/dev/null

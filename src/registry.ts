@@ -759,6 +759,11 @@ export interface ListModulesOptions {
   offset?: number;
 }
 
+export interface GetModuleDetailsOptions {
+  versionsLimit?: number;
+  versionsOffset?: number;
+}
+
 export async function ensureRegistrySchema(db: D1Database): Promise<void> {
   if (registrySchemaReady) {
     return;
@@ -987,11 +992,15 @@ export async function listModules(db: D1Database, options: ListModulesOptions): 
 export async function getModuleDetails(
   db: D1Database,
   moduleKey: string,
+  options: GetModuleDetailsOptions = {},
 ): Promise<{
   module: ModuleSummary;
   versions: ModuleVersionRecord[];
   latest_preview: ModuleVersionRecord | null;
   latest_prod: ModuleVersionRecord | null;
+  versions_total: number;
+  versions_limit: number | null;
+  versions_offset: number;
 }> {
   await ensureRegistrySchema(db);
 
@@ -1024,9 +1033,12 @@ export async function getModuleDetails(
     throw new HttpError(404, `Module '${moduleKey}' not found.`);
   }
 
-  const versionsResult = await db
-    .prepare(
-      `
+  const hasVersionPagination = typeof options.versionsLimit === "number";
+  const versionsLimit = hasVersionPagination
+    ? Math.max(1, Math.min(500, options.versionsLimit ?? 100))
+    : null;
+  const versionsOffset = hasVersionPagination ? Math.max(0, options.versionsOffset ?? 0) : 0;
+  const versionRowsSql = `
       SELECT
         module_key,
         module_version,
@@ -1051,9 +1063,13 @@ export async function getModuleDetails(
       FROM module_versions
       WHERE module_key = ?
       ORDER BY datetime(COALESCE(published_at, created_at)) DESC, id DESC
-      `,
-    )
-    .bind(moduleKey)
+      ${hasVersionPagination ? "LIMIT ? OFFSET ?" : ""}
+      `;
+  const versionsStatement = db.prepare(versionRowsSql);
+  const versionsResult = await (hasVersionPagination && versionsLimit !== null
+    ? versionsStatement.bind(moduleKey, versionsLimit, versionsOffset)
+    : versionsStatement.bind(moduleKey)
+  )
     .all<ModuleVersionRow>();
 
   const versions = (versionsResult.results ?? []).map(toVersionRecord);
@@ -1061,10 +1077,49 @@ export async function getModuleDetails(
   const latestPreviewVersion = moduleRow.latest_version_preview;
   const latestProdVersion = moduleRow.latest_version_prod;
 
-  const latest_preview =
-    versions.find((item) => item.channel === "preview" && item.module_version === latestPreviewVersion) ?? null;
-  const latest_prod =
-    versions.find((item) => item.channel === "prod" && item.module_version === latestProdVersion) ?? null;
+  async function findLatestVersion(channel: PublishChannel, moduleVersion: string | null): Promise<ModuleVersionRecord | null> {
+    if (!moduleVersion) {
+      return null;
+    }
+    const row = await db
+      .prepare(
+        `
+        SELECT
+          module_key,
+          module_version,
+          channel,
+          bundle_url,
+          manifest_url,
+          published_at,
+          provider,
+          component_type,
+          release_json,
+          definition_ref_json,
+          seed_ref_json,
+          definition_json,
+          seed_json,
+          checksums_json,
+          screenshots_json,
+          integrations_json,
+          parameters_json,
+          updated_by,
+          created_at,
+          updated_at
+        FROM module_versions
+        WHERE module_key = ? AND module_version = ? AND channel = ?
+        LIMIT 1
+        `,
+      )
+      .bind(moduleKey, moduleVersion, channel)
+      .first<ModuleVersionRow>();
+    return row ? toVersionRecord(row) : null;
+  }
+
+  const [latest_preview, latest_prod] = await Promise.all([
+    findLatestVersion("preview", latestPreviewVersion),
+    findLatestVersion("prod", latestProdVersion),
+  ]);
+  const versionsTotal = Number(moduleRow.versions_total ?? 0);
 
   return {
     module: {
@@ -1075,12 +1130,15 @@ export async function getModuleDetails(
       latest_version_prod: moduleRow.latest_version_prod,
       latest_published_at_preview: moduleRow.latest_published_at_preview,
       latest_published_at_prod: moduleRow.latest_published_at_prod,
-      versions_total: Number(moduleRow.versions_total ?? 0),
+      versions_total: versionsTotal,
       updated_at: moduleRow.updated_at,
     },
     versions,
     latest_preview,
     latest_prod,
+    versions_total: versionsTotal,
+    versions_limit: versionsLimit,
+    versions_offset: versionsOffset,
   };
 }
 
