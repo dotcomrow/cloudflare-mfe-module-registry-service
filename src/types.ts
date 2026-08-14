@@ -28,6 +28,7 @@ export interface Env {
   PUBLISH_VALIDATION_VERIFY_ASSET_URLS?: string;
   PUBLISH_VALIDATION_VALIDATE_MANIFEST?: string;
   PUBLISH_VALIDATION_TIMEOUT_MS?: string;
+  MODULE_VERSION_RETENTION_LIMIT?: string;
 }
 
 export interface PublishPayload {

@@ -367,3 +367,9 @@ variable "publish_validation_timeout_ms" {
   description = "PUBLISH_VALIDATION_TIMEOUT_MS binding value."
   default     = 8000
 }
+
+variable "module_version_retention_limit" {
+  type        = number
+  description = "MODULE_VERSION_RETENTION_LIMIT binding value. Set to 0 to disable automatic per-module version pruning."
+  default     = 50
+}

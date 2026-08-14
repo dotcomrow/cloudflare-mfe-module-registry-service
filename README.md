@@ -12,6 +12,7 @@ Cloudflare Worker + D1 service for MFE catalog management.
 - Idempotent publish handling (`x-idempotency-key`) to make retries safe.
 - Storage of module metadata, versions, integration info, parameter info, and optional screenshots metadata.
 - Strict, configurable publish validation to block incomplete module metadata.
+- Automatic per-module version retention to prune old registry entries.
 
 ## API Endpoints
 
@@ -130,6 +131,24 @@ curl -X POST "https://<host>/v1/modules/promote" \
   }'
 ```
 
+## Version Retention
+
+The Worker prunes old `module_versions` rows after successful publish and promote requests. Configure the per-module cap with:
+
+- `MODULE_VERSION_RETENTION_LIMIT` (`50` default; set to `0` to disable)
+
+When the cap is enabled, each module keeps the newest rows by `published_at`/`created_at`, with the row being published and current latest channel pointers prioritized. Rows beyond the cap are deleted along with their idempotency records. Publish responses include:
+
+```json
+{
+  "retention": {
+    "enabled": true,
+    "max_versions": 50,
+    "deleted_versions": 3
+  }
+}
+```
+
 ## Authentication For Publish API
 
 Publish auth is enabled by default.
@@ -172,6 +191,7 @@ Publish API validation defaults to strict mode and can be tuned with env vars:
 - `PUBLISH_VALIDATION_VALIDATE_MANIFEST` (defaults to strict mode value)
 - `PUBLISH_VALIDATION_VERIFY_ASSET_URLS` (`false` default; when enabled verifies remote `bundle_url` and `manifest_url` reachability)
 - `PUBLISH_VALIDATION_TIMEOUT_MS` (`8000` default; clamped to `1000..30000`)
+- `MODULE_VERSION_RETENTION_LIMIT` (`50` default; set to `0` to disable per-module pruning)
 
 When strict validation is enabled, publish requires complete definition/seed metadata suitable for Directus rendering and rejects mismatches (for example payload `module_key` vs metadata `module_key`).
 
@@ -243,6 +263,7 @@ Optional Terraform variables:
 - `publish_validation_require_props_schema`, `publish_validation_require_default_props`
 - `publish_validation_validate_manifest`, `publish_validation_verify_asset_urls`
 - `publish_validation_timeout_ms`
+- `module_version_retention_limit`
 
 If base URL overrides are not provided, uploads automatically use `<worker-origin>/assets/...`.
 

@@ -26,6 +26,8 @@ const API_HEADERS: HeadersInit = {
 const MAX_JSON_PUBLISH_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_BUNDLE_BYTES = 50 * 1024 * 1024;
 const DEFAULT_MAX_MANIFEST_BYTES = 5 * 1024 * 1024;
+const DEFAULT_MODULE_VERSION_RETENTION_LIMIT = 50;
+const MAX_MODULE_VERSION_RETENTION_LIMIT = 50000;
 
 interface ParsedPublishRequest {
   payload: PublishPayload;
@@ -138,6 +140,15 @@ function parseBoundedInteger(raw: string | undefined, fallback: number, min: num
     return fallback;
   }
   return Math.max(min, Math.min(max, parsed));
+}
+
+function resolveModuleVersionRetentionLimit(env: Env): number {
+  return parseBoundedInteger(
+    env.MODULE_VERSION_RETENTION_LIMIT,
+    DEFAULT_MODULE_VERSION_RETENTION_LIMIT,
+    0,
+    MAX_MODULE_VERSION_RETENTION_LIMIT,
+  );
 }
 
 function sanitizePathSegment(value: string, fallback: string): string {
@@ -730,6 +741,9 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
       remoteFetchTimeoutMs: parseBoundedInteger(env.PUBLISH_VALIDATION_TIMEOUT_MS, 8000, 1000, 30000),
       manifestDocument,
     };
+    const retentionOptions = {
+      maxVersions: resolveModuleVersionRetentionLimit(env),
+    };
 
     const result = await publishModuleVersion(
       env.REGISTRY_DB,
@@ -738,6 +752,7 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
       requestBodyText,
       idempotencyKey,
       validationOptions,
+      retentionOptions,
     );
     return jsonResponse(result, 200, API_HEADERS);
   }
@@ -755,6 +770,9 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
       validateManifestDocument: false,
       remoteFetchTimeoutMs: parseBoundedInteger(env.PUBLISH_VALIDATION_TIMEOUT_MS, 8000, 1000, 30000),
     };
+    const retentionOptions = {
+      maxVersions: resolveModuleVersionRetentionLimit(env),
+    };
 
     const result = await promoteModuleVersion(
       env.REGISTRY_DB,
@@ -767,6 +785,7 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
       {
         publishedAt: payload.publishedAt,
         validationOptions,
+        retentionOptions,
       },
     );
     return jsonResponse(result, 200, API_HEADERS);

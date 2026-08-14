@@ -32,6 +32,11 @@ interface PublishRow {
   response_json: string;
 }
 
+interface LatestModulePointerRow {
+  module_version: string | null;
+  published_at: string | null;
+}
+
 interface ModuleRow {
   module_key: string;
   provider: string | null;
@@ -79,6 +84,11 @@ interface AuthGatewayAppRow {
   updated_at: string;
 }
 
+interface ModuleLatestPointersRow {
+  latest_version_preview: string | null;
+  latest_version_prod: string | null;
+}
+
 export interface PublishValidationOptions {
   strictMode?: boolean;
   requirePropsSchema?: boolean;
@@ -87,6 +97,20 @@ export interface PublishValidationOptions {
   validateManifestDocument?: boolean;
   remoteFetchTimeoutMs?: number;
   manifestDocument?: Record<string, unknown> | null;
+}
+
+export interface ModuleVersionRetentionOptions {
+  maxVersions?: number;
+  preserve?: {
+    moduleVersion: string;
+    channel: PublishChannel;
+  };
+}
+
+export interface ModuleVersionRetentionResult {
+  enabled: boolean;
+  max_versions: number;
+  deleted_versions: number;
 }
 
 interface ResolvedPublishValidationOptions {
@@ -1195,6 +1219,7 @@ export async function getModuleVersion(
 export interface PromoteModuleVersionOptions {
   publishedAt?: string;
   validationOptions?: PublishValidationOptions;
+  retentionOptions?: ModuleVersionRetentionOptions;
 }
 
 export async function promoteModuleVersion(
@@ -1236,6 +1261,7 @@ export async function promoteModuleVersion(
     JSON.stringify(payload),
     idempotencyKeyHeader,
     options?.validationOptions,
+    options?.retentionOptions,
   );
 
   return {
@@ -1263,6 +1289,206 @@ async function findExistingPublishResponse(db: D1Database, idempotencyKey: strin
   return Object.keys(payload).length > 0 ? payload : null;
 }
 
+function normalizeRetentionLimit(maxVersions: number | undefined): number {
+  if (!Number.isFinite(maxVersions)) {
+    return 0;
+  }
+  return Math.max(0, Math.floor(maxVersions as number));
+}
+
+function buildStaleModuleVersionIdSelector(): string {
+  return `
+    SELECT ordered.id
+    FROM module_versions ordered
+    WHERE ordered.module_key = ?
+    ORDER BY
+      CASE
+        WHEN ordered.module_version = ? AND ordered.channel = ? THEN 0
+        WHEN ordered.channel = 'preview'
+          AND ordered.module_version = (SELECT latest_version_preview FROM modules WHERE module_key = ?) THEN 1
+        WHEN ordered.channel = 'prod'
+          AND ordered.module_version = (SELECT latest_version_prod FROM modules WHERE module_key = ?) THEN 1
+        ELSE 2
+      END ASC,
+      datetime(COALESCE(ordered.published_at, ordered.created_at)) DESC,
+      ordered.id DESC
+    LIMIT -1 OFFSET ?
+  `;
+}
+
+async function findLatestPointerRow(
+  db: D1Database,
+  moduleKey: string,
+  channel: PublishChannel,
+  moduleVersion: string | null,
+): Promise<LatestModulePointerRow | null> {
+  if (!moduleVersion) {
+    return null;
+  }
+
+  return db
+    .prepare(
+      `
+      SELECT module_version, published_at
+      FROM module_versions
+      WHERE module_key = ? AND module_version = ? AND channel = ?
+      LIMIT 1
+      `,
+    )
+    .bind(moduleKey, moduleVersion, channel)
+    .first<LatestModulePointerRow>();
+}
+
+async function findNewestPointerRow(
+  db: D1Database,
+  moduleKey: string,
+  channel: PublishChannel,
+): Promise<LatestModulePointerRow | null> {
+  return db
+    .prepare(
+      `
+      SELECT module_version, published_at
+      FROM module_versions
+      WHERE module_key = ? AND channel = ?
+      ORDER BY datetime(COALESCE(published_at, created_at)) DESC, id DESC
+      LIMIT 1
+      `,
+    )
+    .bind(moduleKey, channel)
+    .first<LatestModulePointerRow>();
+}
+
+async function resolveLatestPointerRow(
+  db: D1Database,
+  moduleKey: string,
+  channel: PublishChannel,
+  currentModuleVersion: string | null,
+): Promise<LatestModulePointerRow | null> {
+  return (
+    (await findLatestPointerRow(db, moduleKey, channel, currentModuleVersion))
+    ?? (await findNewestPointerRow(db, moduleKey, channel))
+  );
+}
+
+async function repairModuleLatestPointersAfterPrune(db: D1Database, moduleKey: string, now: string): Promise<void> {
+  const current = await db
+    .prepare(
+      `
+      SELECT latest_version_preview, latest_version_prod
+      FROM modules
+      WHERE module_key = ?
+      LIMIT 1
+      `,
+    )
+    .bind(moduleKey)
+    .first<ModuleLatestPointersRow>();
+
+  if (!current) {
+    return;
+  }
+
+  const [preview, prod] = await Promise.all([
+    resolveLatestPointerRow(db, moduleKey, "preview", current.latest_version_preview),
+    resolveLatestPointerRow(db, moduleKey, "prod", current.latest_version_prod),
+  ]);
+
+  if (
+    (preview?.module_version ?? null) === current.latest_version_preview
+    && (prod?.module_version ?? null) === current.latest_version_prod
+  ) {
+    return;
+  }
+
+  await db
+    .prepare(
+      `
+      UPDATE modules
+      SET
+        latest_version_preview = ?,
+        latest_published_at_preview = ?,
+        latest_version_prod = ?,
+        latest_published_at_prod = ?,
+        updated_at = ?
+      WHERE module_key = ?
+      `,
+    )
+    .bind(
+      preview?.module_version ?? null,
+      preview?.published_at ?? null,
+      prod?.module_version ?? null,
+      prod?.published_at ?? null,
+      now,
+      moduleKey,
+    )
+    .run();
+}
+
+async function pruneModuleVersions(
+  db: D1Database,
+  moduleKey: string,
+  options: ModuleVersionRetentionOptions | undefined,
+  now: string,
+): Promise<ModuleVersionRetentionResult> {
+  const maxVersions = normalizeRetentionLimit(options?.maxVersions);
+  if (maxVersions === 0) {
+    return {
+      enabled: false,
+      max_versions: 0,
+      deleted_versions: 0,
+    };
+  }
+
+  const selectorSql = buildStaleModuleVersionIdSelector();
+  const preserveModuleVersion = options?.preserve?.moduleVersion ?? "";
+  const preserveChannel = options?.preserve?.channel ?? "";
+  const selectorBinds = [
+    moduleKey,
+    preserveModuleVersion,
+    preserveChannel,
+    moduleKey,
+    moduleKey,
+    maxVersions,
+  ] as const;
+
+  await db
+    .prepare(
+      `
+      DELETE FROM publish_events
+      WHERE EXISTS (
+        SELECT 1
+        FROM module_versions stale
+        WHERE stale.id IN (${selectorSql})
+          AND stale.module_key = publish_events.module_key
+          AND stale.module_version = publish_events.module_version
+          AND stale.channel = publish_events.channel
+      )
+      `,
+    )
+    .bind(...selectorBinds)
+    .run();
+
+  const deleteResult = await db
+    .prepare(
+      `
+      DELETE FROM module_versions
+      WHERE id IN (${selectorSql})
+      `,
+    )
+    .bind(...selectorBinds)
+    .run();
+
+  const deletedVersions = Number(deleteResult.meta.changes ?? 0);
+  if (deletedVersions > 0) {
+    await repairModuleLatestPointersAfterPrune(db, moduleKey, now);
+  }
+
+  return {
+    enabled: true,
+    max_versions: maxVersions,
+    deleted_versions: deletedVersions,
+  };
+}
+
 function toStableJson(value: unknown): string {
   return JSON.stringify(value ?? {}, null, 0);
 }
@@ -1274,6 +1500,7 @@ export async function publishModuleVersion(
   requestBodyText: string,
   idempotencyKeyHeader: string | null,
   validationOptions?: PublishValidationOptions,
+  retentionOptions?: ModuleVersionRetentionOptions,
 ): Promise<Record<string, unknown>> {
   await ensureRegistrySchema(db);
 
@@ -1446,6 +1673,19 @@ export async function publishModuleVersion(
       .run();
   }
 
+  const retention = await pruneModuleVersions(
+    db,
+    payload.module_key,
+    {
+      ...retentionOptions,
+      preserve: {
+        moduleVersion: payload.module_version,
+        channel: payload.channel,
+      },
+    },
+    now,
+  );
+
   const responsePayload: Record<string, unknown> = {
     ok: true,
     module_key: payload.module_key,
@@ -1453,6 +1693,7 @@ export async function publishModuleVersion(
     channel: payload.channel,
     updated_at: now,
     idempotency_key: idempotencyKey,
+    retention,
     publisher: {
       subject: principal.subject,
       email: principal.email,

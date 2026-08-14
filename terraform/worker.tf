@@ -174,6 +174,11 @@ resource "cloudflare_worker_version" "app" {
       type = "plain_text"
       name = "PUBLISH_VALIDATION_TIMEOUT_MS"
       text = tostring(var.publish_validation_timeout_ms)
+    },
+    {
+      type = "plain_text"
+      name = "MODULE_VERSION_RETENTION_LIMIT"
+      text = tostring(var.module_version_retention_limit)
     }
   ]
 
