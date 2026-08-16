@@ -5,7 +5,6 @@ export interface Env {
   REGISTRY_ASSETS: R2Bucket;
   ENVIRONMENT?: string;
   SERVICE_TITLE?: string;
-  AUTH_APPS_READ_TOKEN?: string;
   GOOGLE_AUTH_ENABLED?: string;
   GOOGLE_AUTH_ALLOWED_AUDIENCE?: string;
   GOOGLE_AUTH_ALLOWED_AUDIENCES?: string;

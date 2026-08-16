@@ -20,8 +20,8 @@ Cloudflare Worker + D1 service for MFE catalog management.
 - `GET /api/modules?channel=all|preview|prod&q=<search>&limit=100&offset=0`
 - `GET /api/modules/:module_key`
 - `GET /api/modules/:module_key/:module_version?channel=preview|prod`
-- `GET /api/auth/apps?enabled=all|enabled|disabled&limit=500&offset=0` (optional bearer token via `AUTH_APPS_READ_TOKEN`)
-- `GET /api/auth/apps/:slug` (optional bearer token via `AUTH_APPS_READ_TOKEN`)
+- `GET /api/auth/apps?enabled=all|enabled|disabled&limit=500&offset=0`
+- `GET /api/auth/apps/:slug`
 - `POST /v1/auth/apps/upsert` (Google-auth protected)
 - `POST /v1/modules/publish` (Google-auth protected, supports JSON metadata or multipart file upload)
 - `POST /v1/modules/promote` (Google-auth protected, promotes an existing published version to another channel)
@@ -78,7 +78,7 @@ curl -X POST "https://<host>/v1/auth/apps/upsert" \
   }'
 ```
 
-If `AUTH_APPS_READ_TOKEN` is set, callers to `GET /api/auth/apps*` must send `Authorization: Bearer <AUTH_APPS_READ_TOKEN>`.
+Auth app registry read endpoints are public. Only upserts require publish authentication.
 
 ### Publish With Direct File Upload
 
@@ -254,7 +254,6 @@ Optional Terraform variables:
 - `google_auth_allowed_audience` (preferred shared value for both preview/prod)
 - `google_auth_allowed_audiences` (legacy fallback CSV)
 - `google_auth_allowed_emails`, `google_auth_allowed_domains`
-- `auth_apps_read_token` (optional bearer token required by auth app read endpoints)
 - `publish_uploads_enabled`
 - `publish_uploads_public_base_url_preview`, `publish_uploads_public_base_url_production` (optional URL overrides)
 - `publish_uploads_r2_prefix`

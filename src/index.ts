@@ -89,26 +89,6 @@ function parseEnabledFilterParam(raw: string | null): "all" | "enabled" | "disab
   throw new HttpError(400, "Invalid enabled query parameter.");
 }
 
-function assertAuthAppsReadAccess(request: Request, env: Env): void {
-  const configuredToken = (env.AUTH_APPS_READ_TOKEN ?? "").trim();
-  if (!configuredToken) {
-    return;
-  }
-
-  const header = request.headers.get("authorization") ?? "";
-  if (!header.startsWith("Bearer ")) {
-    throw new HttpError(401, "Missing Authorization Bearer token.");
-  }
-
-  const providedToken = header.slice("Bearer ".length).trim();
-  if (!providedToken) {
-    throw new HttpError(401, "Authorization token is empty.");
-  }
-  if (providedToken !== configuredToken) {
-    throw new HttpError(403, "Auth app read token is invalid.");
-  }
-}
-
 function parseIntegerParam(raw: string | null, fallback: number, min: number, max: number): number {
   if (!raw) {
     return fallback;
@@ -628,7 +608,6 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   }
 
   if (request.method === "GET" && pathname === "/api/auth/apps") {
-    assertAuthAppsReadAccess(request, env);
     const enabled = parseEnabledFilterParam(url.searchParams.get("enabled"));
     const limit = parseIntegerParam(url.searchParams.get("limit"), 500, 1, 1000);
     const offset = parseIntegerParam(url.searchParams.get("offset"), 0, 0, 50000);
@@ -653,7 +632,6 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   }
 
   if (request.method === "GET" && pathname.startsWith("/api/auth/apps/")) {
-    assertAuthAppsReadAccess(request, env);
     const parts = pathname.split("/").filter(Boolean);
     if (parts.length === 4) {
       const slug = parsePathSegment(parts[3]);

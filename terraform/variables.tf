@@ -218,13 +218,6 @@ variable "service_title" {
   default     = "MFE Module Registry"
 }
 
-variable "auth_apps_read_token" {
-  type        = string
-  description = "Optional bearer token required for reading auth app registry endpoints."
-  default     = ""
-  sensitive   = true
-}
-
 variable "google_auth_enabled" {
   type        = string
   description = "GOOGLE_AUTH_ENABLED binding value."
