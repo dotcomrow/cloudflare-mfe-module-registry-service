@@ -4,6 +4,7 @@ import {
   requirePublishAuth,
 } from "./google-auth";
 import {
+  deleteOwnedAuthGatewayApps,
   getAuthGatewayApp,
   getModuleDetails,
   getModuleVersion,
@@ -12,6 +13,7 @@ import {
   promoteModuleVersion,
   publishModuleVersion,
   upsertAuthGatewayApp,
+  validateAuthGatewayOwnedAppsDeletePayload,
   validateAuthGatewayAppUpsertPayload,
   validatePublishPayload,
 } from "./registry";
@@ -699,6 +701,32 @@ async function handleApiRequest(request: Request, env: Env): Promise<Response> {
       {
         ok: true,
         app,
+      },
+      200,
+      API_HEADERS,
+    );
+  }
+
+  if (request.method === "POST" && pathname === "/v1/auth/apps/delete-owned") {
+    await requirePublishAuth(request, env);
+    const bodyText = await request.text();
+    if (bodyText.length > MAX_JSON_PUBLISH_BODY_BYTES) {
+      throw new HttpError(413, "Auth app deletion payload too large.");
+    }
+
+    let rawPayload: unknown;
+    try {
+      rawPayload = JSON.parse(bodyText || "{}");
+    } catch {
+      throw new HttpError(400, "Auth app deletion payload must be valid JSON.");
+    }
+
+    const payload = validateAuthGatewayOwnedAppsDeletePayload(rawPayload);
+    const result = await deleteOwnedAuthGatewayApps(env.REGISTRY_DB, payload);
+    return jsonResponse(
+      {
+        ok: true,
+        result,
       },
       200,
       API_HEADERS,

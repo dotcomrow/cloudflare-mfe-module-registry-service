@@ -1,4 +1,6 @@
 import type {
+  AuthGatewayOwnedAppsDeletePayload,
+  AuthGatewayOwnedAppsDeleteResult,
   AuthGatewayAppRecord,
   AuthGatewayAppUpsertPayload,
   AuthPrincipal,
@@ -315,6 +317,38 @@ export function validateAuthGatewayAppUpsertPayload(raw: unknown): AuthGatewayAp
     base_urls: baseUrls,
     enabled,
     module_key: moduleKey,
+  };
+}
+
+export function validateAuthGatewayOwnedAppsDeletePayload(raw: unknown): AuthGatewayOwnedAppsDeletePayload {
+  if (!isRecord(raw)) {
+    throw new HttpError(400, "Auth app deletion payload must be an object.");
+  }
+
+  const moduleKey = validateModuleKey(raw.module_key);
+  if (!Array.isArray(raw.apps) || raw.apps.length === 0 || raw.apps.length > 20) {
+    throw new HttpError(400, "apps must contain between 1 and 20 owned auth app entries.");
+  }
+
+  const seenSlugs = new Set<string>();
+  const apps = raw.apps.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new HttpError(400, `apps[${index}] must be an object.`);
+    }
+    const slug = validateAuthAppSlug(entry.slug);
+    if (seenSlugs.has(slug)) {
+      throw new HttpError(400, `apps contains duplicate slug '${slug}'.`);
+    }
+    seenSlugs.add(slug);
+    return {
+      slug,
+      base_url: validateUrl(entry.base_url, `apps[${index}].base_url`),
+    };
+  });
+
+  return {
+    module_key: moduleKey,
+    apps,
   };
 }
 
@@ -905,7 +939,7 @@ export async function upsertAuthGatewayApp(
   const now = nowIso();
   const updatedBy = principal.email ?? principal.subject;
 
-  await db
+  const upsertResult = await db
     .prepare(
       `
       INSERT INTO auth_gateway_apps (
@@ -927,6 +961,15 @@ export async function upsertAuthGatewayApp(
         module_key = excluded.module_key,
         updated_by = excluded.updated_by,
         updated_at = excluded.updated_at
+      WHERE
+        auth_gateway_apps.module_key = excluded.module_key
+        OR (auth_gateway_apps.module_key IS NULL AND excluded.module_key IS NULL)
+        OR (
+          auth_gateway_apps.module_key IS NULL
+          AND excluded.module_key IS NOT NULL
+          AND auth_gateway_apps.base_url = excluded.base_url
+          AND auth_gateway_apps.base_urls_json = excluded.base_urls_json
+        )
       `,
     )
     .bind(
@@ -942,7 +985,84 @@ export async function upsertAuthGatewayApp(
     )
     .run();
 
+  if (Number(upsertResult.meta.changes ?? 0) !== 1) {
+    throw new HttpError(409, `Auth app '${normalizedPayload.slug}' is owned by another platform app or has different legacy URLs.`, {
+      slug: normalizedPayload.slug,
+      requested_module_key: normalizedPayload.module_key ?? null,
+    });
+  }
+
   return getAuthGatewayApp(db, normalizedPayload.slug);
+}
+
+export async function deleteOwnedAuthGatewayApps(
+  db: D1Database,
+  payload: AuthGatewayOwnedAppsDeletePayload,
+): Promise<AuthGatewayOwnedAppsDeleteResult> {
+  await ensureRegistrySchema(db);
+  const normalizedPayload = validateAuthGatewayOwnedAppsDeletePayload(payload);
+  const requestedSlugs = normalizedPayload.apps.map((entry) => entry.slug);
+
+  const ownedMatchSql = normalizedPayload.apps
+    .map(() => "(candidate.slug = ? AND candidate.base_url = ?)")
+    .join(" OR ");
+  const deleteMatchSql = normalizedPayload.apps
+    .map(() => "(slug = ? AND base_url = ?)")
+    .join(" OR ");
+  const conflictSlugSql = normalizedPayload.apps.map(() => "?").join(", ");
+  const ownedMatchBindings = normalizedPayload.apps.flatMap((entry) => [entry.slug, entry.base_url]);
+  const deleteMatchBindings = normalizedPayload.apps.flatMap((entry) => [entry.slug, entry.base_url]);
+
+  const result = await db
+    .prepare(
+      `
+      DELETE FROM auth_gateway_apps
+      WHERE module_key = ?
+        AND (${deleteMatchSql})
+        AND NOT EXISTS (
+          SELECT 1
+          FROM auth_gateway_apps candidate
+          WHERE candidate.slug IN (${conflictSlugSql})
+            AND NOT (
+              candidate.module_key = ?
+              AND (${ownedMatchSql})
+            )
+        )
+      `,
+    )
+    .bind(
+      normalizedPayload.module_key,
+      ...deleteMatchBindings,
+      ...requestedSlugs,
+      normalizedPayload.module_key,
+      ...ownedMatchBindings,
+    )
+    .run();
+
+  const remaining = await db
+    .prepare(
+      `
+      SELECT slug, module_key, base_url
+      FROM auth_gateway_apps
+      WHERE slug IN (${conflictSlugSql})
+      ORDER BY slug ASC
+      `,
+    )
+    .bind(...requestedSlugs)
+    .all<{ slug: string; module_key: string | null; base_url: string }>();
+
+  if ((remaining.results ?? []).length > 0) {
+    throw new HttpError(409, "Refusing auth app deletion because one or more slugs are not owned by the requested platform app and URL.", {
+      requested_module_key: normalizedPayload.module_key,
+      conflicts: remaining.results ?? [],
+    });
+  }
+
+  return {
+    module_key: normalizedPayload.module_key,
+    requested_slugs: requestedSlugs,
+    deleted: Number(result.meta.changes ?? 0),
+  };
 }
 
 export async function listModules(db: D1Database, options: ListModulesOptions): Promise<{ items: ModuleSummary[]; total: number }> {
