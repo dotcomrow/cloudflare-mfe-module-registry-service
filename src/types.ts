@@ -54,6 +54,22 @@ export interface AuthGatewayAppUpsertPayload {
   module_key?: string;
 }
 
+export interface AuthGatewayOwnedAppDeleteEntry {
+  slug: string;
+  base_url: string;
+}
+
+export interface AuthGatewayOwnedAppsDeletePayload {
+  module_key: string;
+  apps: AuthGatewayOwnedAppDeleteEntry[];
+}
+
+export interface AuthGatewayOwnedAppsDeleteResult {
+  module_key: string;
+  requested_slugs: string[];
+  deleted: number;
+}
+
 export interface AuthGatewayAppRecord {
   slug: string;
   display_name: string;
